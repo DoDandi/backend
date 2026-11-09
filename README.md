@@ -57,7 +57,7 @@ supabase/    스키마 SQL
 
 ## 규칙
 
-- 작업 브랜치(`feature/…`) → `develop`으로 PR 후 머지. `main`에는 직접 푸시할 수 없고, 최종본만 `develop`에서 PR로 머지한다
+- 작업 브랜치(`feature/…`) → `develop`으로 PR 후 머지. `main`에는 직접 푸시하지 않고, 최종본만 `develop`에서 PR로 머지한다
 - 스키마 변경은 `supabase/`에 SQL 파일로 PR
 - 응답 형태를 바꾸면 프론트 담당에게 먼저 알리기
 - `lib/constants.ts`, `lib/temperature.ts`, `lib/geo.ts`, `lib/time.ts`는 프론트 저장소에도 복사본이 있으므로, 바꾸면 프론트에도 반영 요청
