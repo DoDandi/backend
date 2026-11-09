@@ -65,3 +65,26 @@ export const CATEGORY_BASELINE: Record<Category, number> = {
 export const ZONE_BASELINE = 20;
 // 확대 레벨이 이 값 이상(멀리 봄)이면 구역, 미만(가까이 봄)이면 매장을 그린다
 export const ZONE_LEVEL_THRESHOLD = 5;
+
+// 화면 필터 그룹 (11/7 결정). 묶는 일은 서버가 한다
+export const GROUPS = ['food', 'festival', 'sports', 'etc'] as const;
+export type Group = (typeof GROUPS)[number];
+
+export const CATEGORY_GROUP: Record<Category, Group> = {
+  food: 'food',
+  cafe: 'food',
+  market: 'food',
+  night_market: 'food',
+  festival: 'festival',
+  show: 'festival',
+  cheer: 'sports',
+  street: 'etc',
+};
+
+// 게시물 (사진 1장 + 글, 11/9 피그마 SCREEN 07·08)
+export const POST_TEXT_MAX = 300;
+export const POST_IMAGE_MAX_BYTES = 4 * 1024 * 1024; // Vercel 요청 한도 4.5MB 안. 프론트가 1280px JPEG로 줄여 보낸다
+export const POST_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp'] as const;
+export const POST_IMAGE_BUCKET = 'post-images';
+export const POST_DEFAULT_NICKNAME = '익명 사용자'; // 카카오 로그인 연결 전까지
+export const FEED_LIMIT = 30;
