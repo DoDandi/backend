@@ -55,3 +55,21 @@ alter table heat_events enable row level security;
 -- 최근 Supabase는 새 테이블 권한을 자동으로 주지 않으므로 service role에 명시적으로 부여
 grant select, insert, update, delete on table zones, places, heat_events to service_role;
 grant usage, select on sequence heat_events_id_seq to service_role;
+
+-- 게시물 (사진 1장 + 글). 이미 만든 DB라면 migration-003-posts.sql만 실행한다
+create table posts (
+  id          uuid primary key default gen_random_uuid(),
+  place_id    uuid not null references places(id) on delete cascade,
+  device_id   text not null,
+  user_id     uuid,
+  nickname    text not null default '익명 사용자',
+  image_path  text not null,
+  text        text not null check (char_length(text) between 1 and 300),
+  created_at  timestamptz not null default now()
+);
+create index posts_time on posts (created_at desc);
+create index posts_place_time on posts (place_id, created_at desc);
+create index posts_device_time on posts (device_id, created_at desc);
+alter table posts enable row level security;
+grant select, insert, update, delete on table posts to service_role;
+insert into storage.buckets (id, name, public) values ('post-images', 'post-images', true) on conflict (id) do nothing;

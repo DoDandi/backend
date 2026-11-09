@@ -1,6 +1,7 @@
 import 'server-only';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-import { WINDOW_MIN, type Category } from './constants';
+import { FEED_LIMIT, POST_IMAGE_BUCKET, WINDOW_MIN, type Category } from './constants';
+import { toPost, type Post, type PostRow } from './posts';
 import { band, temperature, type HeatEvent } from './temperature';
 
 let client: SupabaseClient | null = null;
@@ -152,4 +153,24 @@ export async function zonesWithTemps() {
       placeCount: placeCount.get(z.id) ?? 0,
     };
   });
+}
+
+/** 게시물 사진의 공개 주소 */
+export function postImageUrl(path: string): string {
+  return supabase().storage.from(POST_IMAGE_BUCKET).getPublicUrl(path).data.publicUrl;
+}
+
+/** 게시물 목록 (최신순). 장소 하나 또는 카테고리 묶음으로 거른다. before(ISO)보다 오래된 것만 → 다음 페이지 */
+export async function listPosts(opts: { placeId?: string; categories?: readonly Category[]; before?: string; limit?: number }): Promise<Post[]> {
+  let q = supabase()
+    .from('posts')
+    .select('id, place_id, nickname, image_path, text, created_at, places!inner(name, category)')
+    .order('created_at', { ascending: false })
+    .limit(opts.limit ?? FEED_LIMIT);
+  if (opts.placeId) q = q.eq('place_id', opts.placeId);
+  if (opts.categories) q = q.in('places.category', opts.categories as Category[]);
+  if (opts.before) q = q.lt('created_at', opts.before);
+  const { data, error } = await q;
+  if (error) throw error;
+  return (data as unknown as PostRow[]).map(r => toPost(r, postImageUrl));
 }
