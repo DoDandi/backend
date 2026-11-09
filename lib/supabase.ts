@@ -89,14 +89,24 @@ function withExtras(t: { temp: number; band: string }, events: HeatEvent[], now:
   return { ...t, vsBaseline: vsBaseline(t.temp), peers30m: peersIn(events, now) };
 }
 
+/** 장소별 최신 게시물 사진 (목록 썸네일용, 02-B). 최근 게시물 500개 안에서 찾는다 */
+async function latestPhotoByPlace(): Promise<Map<string, string>> {
+  const { data, error } = await supabase().from('posts').select('place_id, image_path').order('created_at', { ascending: false }).limit(500);
+  if (error) throw error;
+  const m = new Map<string, string>();
+  for (const r of data as { place_id: string; image_path: string }[]) if (!m.has(r.place_id)) m.set(r.place_id, postImageUrl(r.image_path));
+  return m;
+}
+
 /** 장소 목록 + 현재 온도 (최근 30분 heat_events를 한 번에 가져와 장소별로 계산) */
 export async function placesWithTemps(category?: Category) {
   const now = new Date();
   let q = supabase().from('places').select('*').order('name');
   if (category) q = q.eq('category', category);
-  const [{ data, error }, rows] = await Promise.all([
+  const [{ data, error }, rows, photos] = await Promise.all([
     q,
     fetchEventsSince(new Date(now.getTime() - WINDOW_MIN * 60_000)),
+    latestPhotoByPlace(),
   ]);
   if (error) throw error;
   const byPlace = groupByPlace(rows);
@@ -110,6 +120,7 @@ export async function placesWithTemps(category?: Category) {
     lng: p.lng,
     ...withExtras(placeTemp(p, byPlace.get(p.id) ?? [], now), byPlace.get(p.id) ?? [], now),
     eventActive: p.event_active,
+    photoUrl: photos.get(p.id) ?? null,
   }));
 }
 
