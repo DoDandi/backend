@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { COOLDOWN_MIN, HEAT_RADIUS_M, HOURLY_LIMIT, SYNC_WINDOW_SEC, WINDOW_MIN } from '@/lib/constants';
 import { distanceM } from '@/lib/geo';
-import { fetchEventsSince, placeTemp, supabase, toHeatEvent, type PlaceRow } from '@/lib/supabase';
+import { fetchEventsSince, fetchSchedules, placeTemp, supabase, toHeatEvent, type PlaceRow } from '@/lib/supabase';
 import { eventScore } from '@/lib/temperature';
 
 export const dynamic = 'force-dynamic';
@@ -61,8 +61,12 @@ export async function POST(req: Request) {
   }
 
   // 저장 전 온도
-  const before = (await fetchEventsSince(new Date(now.getTime() - WINDOW_MIN * 60_000), placeId)).map(toHeatEvent);
-  const tempBefore = placeTemp(place, before, now).temp;
+  const [beforeRows, schedules] = await Promise.all([
+    fetchEventsSince(new Date(now.getTime() - WINDOW_MIN * 60_000), placeId),
+    fetchSchedules(now, new Date(now.getTime() + 60_000), placeId),
+  ]);
+  const before = beforeRows.map(toHeatEvent);
+  const tempBefore = placeTemp(place, before, now, schedules).temp;
 
   // 4. 서버에서 점수를 다시 계산해 저장
   const score = eventScore(taps as number, shake);
@@ -78,7 +82,7 @@ export async function POST(req: Request) {
   const after = [...before, { deviceId, score, createdAt }];
   // DB 시각이 앱 서버 시각보다 약간 앞설 수 있어, 새 기록이 빠지지 않도록 더 늦은 쪽을 기준으로 계산
   const afterNow = new Date(Math.max(Date.now(), createdAt.getTime()));
-  const tempAfter = placeTemp(place, after, afterNow).temp;
+  const tempAfter = placeTemp(place, after, afterNow, schedules).temp;
   const syncSince = afterNow.getTime() - SYNC_WINDOW_SEC * 1000;
   const peers = new Set(after.filter(e => e.createdAt.getTime() >= syncSince).map(e => e.deviceId)).size;
 

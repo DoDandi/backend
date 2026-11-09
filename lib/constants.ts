@@ -7,6 +7,8 @@ export const TEMP_PER_RATIO = 10;
 export const MAX_RATIO = 3;
 export const EVENT_BONUS = 5;
 export const TREND_BONUS = 3;
+// 일정 보너스: 시작 SCHEDULE_LEAD_MIN분 전부터 끝날 때까지 EVENT_BONUS를 켠다 (노션 2-3·5)
+export const SCHEDULE_LEAD_MIN = 60;
 // 평소 수준(반응 비율 1)의 온도. 장소 상세 "평소 대비"와 코스 후보 기준에 쓴다
 export const USUAL_TEMP = BASE_TEMP + TEMP_PER_RATIO;
 
@@ -91,3 +93,15 @@ export const POST_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp'] as con
 export const POST_IMAGE_BUCKET = 'post-images';
 export const POST_DEFAULT_NICKNAME = '익명 사용자'; // 카카오 로그인 연결 전까지
 export const FEED_LIMIT = 30;
+
+// 일정 (노션 「현재 진행 상황 공유」 5). 끝 시각이 없는 일정은 종류별로 시작 후 이만큼을 끝으로 본다
+export const SCHEDULE_KINDS = ['baseball', 'football', 'festival', 'show', 'busking', 'etc'] as const;
+export type ScheduleKind = (typeof SCHEDULE_KINDS)[number];
+export const SCHEDULE_DEFAULT_DURATION_MIN: Record<ScheduleKind, number> = {
+  baseball: 210, // KBO: 시작 후 3시간 30분
+  football: 150, // K리그: 시작 후 2시간 30분
+  festival: 720, // 축제: 날짜만 있으면 10:00–22:00
+  show: 150,
+  busking: 120,
+  etc: 120,
+};

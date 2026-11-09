@@ -1,7 +1,8 @@
 import 'server-only';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-import { CATEGORY_GROUP, FEED_LIMIT, POST_IMAGE_BUCKET, WINDOW_MIN, type Category } from './constants';
+import { CATEGORY_GROUP, FEED_LIMIT, POST_IMAGE_BUCKET, SCHEDULE_LEAD_MIN, WINDOW_MIN, type Category, type ScheduleKind } from './constants';
 import { toPost, type Post, type PostRow } from './posts';
+import { groupSchedulesByPlace, hasActiveSchedule, type Schedule } from './schedules';
 import { band, temperature, type HeatEvent } from './temperature';
 
 let client: SupabaseClient | null = null;
@@ -67,13 +68,41 @@ export function groupByPlace(rows: EventRow[]): Map<string, HeatEvent[]> {
   return m;
 }
 
-export function placeTemp(p: PlaceRow, events: HeatEvent[], now = new Date()) {
+/** 행사 보너스: 수동 event_active 또는 지금 보너스가 켜진 일정이 있으면 */
+export function placeEventActive(p: Pick<PlaceRow, 'event_active'>, schedules: readonly Schedule[], now: Date): boolean {
+  return p.event_active || hasActiveSchedule(schedules, now);
+}
+
+export function placeTemp(p: PlaceRow, events: HeatEvent[], now = new Date(), schedules: readonly Schedule[] = []) {
   const temp = temperature(
-    { baseline: Number(p.baseline), eventActive: p.event_active, trendSurge: p.trend_surge },
+    { baseline: Number(p.baseline), eventActive: placeEventActive(p, schedules, now), trendSurge: p.trend_surge },
     events,
     now
   );
   return { temp, band: band(temp) };
+}
+
+type ScheduleRow = { id: string; place_id: string; title: string; kind: ScheduleKind; starts_at: string; ends_at: string };
+
+/** [from, to] 사이에 보너스가 켜질 수 있는 일정 (시작 1시간 전 ~ 끝이 이 구간과 겹치는 것) */
+export async function fetchSchedules(from: Date, to: Date, placeId?: string): Promise<Schedule[]> {
+  let q = supabase()
+    .from('schedules')
+    .select('id, place_id, title, kind, starts_at, ends_at')
+    .lt('starts_at', new Date(to.getTime() + SCHEDULE_LEAD_MIN * 60_000).toISOString())
+    .gt('ends_at', from.toISOString())
+    .order('starts_at');
+  if (placeId) q = q.eq('place_id', placeId);
+  const { data, error } = await q;
+  if (error) throw error;
+  return (data as ScheduleRow[]).map(r => ({
+    id: r.id,
+    placeId: r.place_id,
+    title: r.title,
+    kind: r.kind,
+    startsAt: new Date(r.starts_at),
+    endsAt: new Date(r.ends_at),
+  }));
 }
 
 /** 장소 목록 + 현재 온도 (최근 30분 heat_events를 한 번에 가져와 장소별로 계산) */
@@ -82,12 +111,14 @@ export async function placesWithTemps(filter?: { category?: Category; categories
   let q = supabase().from('places').select('*').order('name');
   if (filter?.category) q = q.eq('category', filter.category);
   if (filter?.categories) q = q.in('category', filter.categories as Category[]);
-  const [{ data, error }, rows] = await Promise.all([
+  const [{ data, error }, rows, schedules] = await Promise.all([
     q,
     fetchEventsSince(new Date(now.getTime() - WINDOW_MIN * 60_000)),
+    fetchSchedules(now, now),
   ]);
   if (error) throw error;
   const byPlace = groupByPlace(rows);
+  const schedulesByPlace = groupSchedulesByPlace(schedules);
   return (data as PlaceRow[]).map(p => ({
     id: p.id,
     zoneId: p.zone_id,
@@ -96,8 +127,8 @@ export async function placesWithTemps(filter?: { category?: Category; categories
     group: CATEGORY_GROUP[p.category],
     lat: p.lat,
     lng: p.lng,
-    ...placeTemp(p, byPlace.get(p.id) ?? [], now),
-    eventActive: p.event_active,
+    ...placeTemp(p, byPlace.get(p.id) ?? [], now, schedulesByPlace.get(p.id) ?? []),
+    eventActive: placeEventActive(p, schedulesByPlace.get(p.id) ?? [], now),
   }));
 }
 
@@ -116,10 +147,11 @@ export type ZoneRow = {
 /** 구역 목록 + 현재 온도. 구역 안 모든 장소의 반응을 합쳐 같은 엔진으로 계산 (동시성도 구역 단위) */
 export async function zonesWithTemps() {
   const now = new Date();
-  const [zones, places, rows] = await Promise.all([
+  const [zones, places, rows, schedules] = await Promise.all([
     supabase().from('zones').select('*').not('lat', 'is', null).order('name'),
     supabase().from('places').select('id, zone_id'),
     fetchEventsSince(new Date(now.getTime() - WINDOW_MIN * 60_000)),
+    fetchSchedules(now, now),
   ]);
   if (zones.error) throw zones.error;
   if (places.error) throw places.error;
@@ -127,6 +159,11 @@ export async function zonesWithTemps() {
   const zoneOf = new Map((places.data as { id: string; zone_id: string | null }[]).map(p => [p.id, p.zone_id]));
   const placeCount = new Map<string, number>();
   for (const z of zoneOf.values()) if (z) placeCount.set(z, (placeCount.get(z) ?? 0) + 1);
+
+  // 구역 안 장소 중 하나라도 일정 보너스가 켜져 있으면 구역도 행사 중으로 본다
+  const zoneWithSchedule = new Set(
+    schedules.filter(s => hasActiveSchedule([s], now)).map(s => zoneOf.get(s.placeId)).filter((z): z is string => !!z)
+  );
 
   const eventsByZone = new Map<string, HeatEvent[]>();
   for (const r of rows) {
@@ -139,7 +176,7 @@ export async function zonesWithTemps() {
 
   return (zones.data as ZoneRow[]).map(z => {
     const temp = temperature(
-      { baseline: Number(z.baseline), eventActive: z.event_active, trendSurge: z.trend_surge },
+      { baseline: Number(z.baseline), eventActive: z.event_active || zoneWithSchedule.has(z.id), trendSurge: z.trend_surge },
       eventsByZone.get(z.id) ?? [],
       now
     );
