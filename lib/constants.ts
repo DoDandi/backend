@@ -9,7 +9,6 @@ export const EVENT_BONUS = 5;
 export const TREND_BONUS = 3;
 
 // 어뷰징 방지 (5장·7장)
-export const HEAT_RADIUS_M = 150;
 export const COOLDOWN_MIN = 5;
 export const HOURLY_LIMIT = 20;
 export const PEERS_NOW_MIN = 5;
@@ -88,3 +87,17 @@ export const POST_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp'] as con
 export const POST_IMAGE_BUCKET = 'post-images';
 export const POST_DEFAULT_NICKNAME = '익명 사용자'; // 카카오 로그인 연결 전까지
 export const FEED_LIMIT = 30;
+
+// 현장 인증 (11/10 결정). 장소 종류별 반경 + GPS 오차 확인. 현장 테스트 후 숫자만 조정한다
+export const HEAT_RADIUS_BY_CATEGORY: Record<Category, number> = {
+  food: 30,
+  cafe: 30,
+  market: 80,
+  night_market: 80,
+  street: 80,
+  show: 150,
+  festival: 150,
+  cheer: 300,
+};
+// 폰이 알려 주는 위치 오차(m)가 이보다 크면 인증하지 않는다
+export const GPS_MAX_ACCURACY_M = 30;
