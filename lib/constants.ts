@@ -2,11 +2,12 @@
 export const WINDOW_MIN = 30;
 export const SYNC_WINDOW_SEC = 60;
 export const MAX_TAPS = 40;
-export const BASE_TEMP = 20;
+// 11/7 결정: T = 10 + 10 × min(R/B, 3) + E. 평소 수준(R = B)이면 20°
+export const BASE_TEMP = 10;
+export const NORMAL_TEMP = 20; // vsBaseline = 현재 열기 − 20°
 export const TEMP_PER_RATIO = 10;
 export const MAX_RATIO = 3;
 export const EVENT_BONUS = 5;
-export const TREND_BONUS = 3;
 
 // 어뷰징 방지 (5장·7장)
 export const COOLDOWN_MIN = 5;
@@ -24,7 +25,7 @@ export const TIMELINE_STEP_MIN = 10;
 
 // 열기 코스 (5장)
 export const COURSE_RADIUS_KM = 1.5;
-export const COURSE_MIN_TEMP = 30;
+export const COURSE_MIN_TEMP = 20; // 11/7 결정: 20° 이상만 추천
 export const COURSE_EXCLUDE_M = 50;
 export const COURSE_DIST_PENALTY = 10; // 온도 − 10 × 거리(km)
 export const COURSE_DEFAULT_LIMIT = 3;
