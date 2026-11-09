@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
-import { PEERS_NOW_MIN, TIMELINE_STEP_MIN, WINDOW_MIN } from '@/lib/constants';
-import { fetchEventsSince, placeTemp, supabase, toHeatEvent, type PlaceRow } from '@/lib/supabase';
+import { CATEGORY_GROUP, PEERS_NOW_MIN, TIMELINE_STEP_MIN, WINDOW_MIN } from '@/lib/constants';
+import { fetchEventsSince, peersIn, placeTemp, supabase, toHeatEvent, vsBaseline, type PlaceRow } from '@/lib/supabase';
 import { startOfTodayKST, toKSTISO } from '@/lib/time';
 
 export const dynamic = 'force-dynamic';
@@ -33,6 +33,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     id: place.id,
     name: place.name,
     category: place.category,
+    group: CATEGORY_GROUP[place.category],
     zoneId: place.zone_id,
     zoneName: place.zones?.name ?? null,
     description: place.description,
@@ -43,6 +44,8 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     band,
     eventActive: place.event_active,
     peersNow,
+    vsBaseline: vsBaseline(temp),
+    peers30m: peersIn(events, now),
     todayPeak,
   });
 }

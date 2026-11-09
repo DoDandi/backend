@@ -1,6 +1,6 @@
 import 'server-only';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-import { FEED_LIMIT, POST_IMAGE_BUCKET, WINDOW_MIN, type Category } from './constants';
+import { CATEGORY_GROUP, FEED_LIMIT, NORMAL_TEMP, POST_IMAGE_BUCKET, WINDOW_MIN, type Category } from './constants';
 import { toPost, type Post, type PostRow } from './posts';
 import { band, temperature, type HeatEvent } from './temperature';
 
@@ -67,13 +67,26 @@ export function groupByPlace(rows: EventRow[]): Map<string, HeatEvent[]> {
   return m;
 }
 
+/** 평소(20°) 대비 몇 도 (소수 첫째 자리) */
+export const vsBaseline = (temp: number) => Math.round((temp - NORMAL_TEMP) * 10) / 10;
+
+/** 최근 30분 안에 참여한 서로 다른 기기 수 */
+export function peersIn(events: HeatEvent[], now: Date, minutes = WINDOW_MIN): number {
+  const since = now.getTime() - minutes * 60_000;
+  return new Set(events.filter(e => e.createdAt.getTime() >= since).map(e => e.deviceId)).size;
+}
+
 export function placeTemp(p: PlaceRow, events: HeatEvent[], now = new Date()) {
   const temp = temperature(
-    { baseline: Number(p.baseline), eventActive: p.event_active, trendSurge: p.trend_surge },
+    { baseline: Number(p.baseline), eventActive: p.event_active },
     events,
     now
   );
   return { temp, band: band(temp) };
+}
+
+function withExtras(t: { temp: number; band: string }, events: HeatEvent[], now: Date) {
+  return { ...t, vsBaseline: vsBaseline(t.temp), peers30m: peersIn(events, now) };
 }
 
 /** 장소 목록 + 현재 온도 (최근 30분 heat_events를 한 번에 가져와 장소별로 계산) */
@@ -92,9 +105,10 @@ export async function placesWithTemps(category?: Category) {
     zoneId: p.zone_id,
     name: p.name,
     category: p.category,
+    group: CATEGORY_GROUP[p.category],
     lat: p.lat,
     lng: p.lng,
-    ...placeTemp(p, byPlace.get(p.id) ?? [], now),
+    ...withExtras(placeTemp(p, byPlace.get(p.id) ?? [], now), byPlace.get(p.id) ?? [], now),
     eventActive: p.event_active,
   }));
 }
@@ -137,7 +151,7 @@ export async function zonesWithTemps() {
 
   return (zones.data as ZoneRow[]).map(z => {
     const temp = temperature(
-      { baseline: Number(z.baseline), eventActive: z.event_active, trendSurge: z.trend_surge },
+      { baseline: Number(z.baseline), eventActive: z.event_active },
       eventsByZone.get(z.id) ?? [],
       now
     );
@@ -150,6 +164,8 @@ export async function zonesWithTemps() {
       radiusM: z.radius_m,
       temp,
       band: band(temp),
+      vsBaseline: vsBaseline(temp),
+      peers30m: peersIn(eventsByZone.get(z.id) ?? [], now),
       placeCount: placeCount.get(z.id) ?? 0,
     };
   });

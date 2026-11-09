@@ -87,7 +87,7 @@ async function ambient() {
 async function burst() {
   const name = arg('place');
   if (!name) throw new Error('--place "장소명" 이 필요합니다');
-  // B=10(시장) 장소를 행사 보너스 없이 50°C로 올리려면 R ≥ 30 → 동시성 2배 기준 약 22대 필요
+  // B=10(시장) 장소를 행사 보너스 없이 40°(대프리카)로 올리려면 R ≥ 30 → 동시성 2배 기준 약 22대 필요
   const n = Number(arg('devices', '25'));
   const places = await getPlaces();
   const place = places.find(p => p.name === name) ?? places.find(p => p.name.includes(name));

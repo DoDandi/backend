@@ -18,7 +18,8 @@ export async function POST(req: Request) {
   // 1. 입력 검증
   if (typeof placeId !== 'string' || typeof deviceId !== 'string' || !deviceId) return invalid();
   if (!Number.isInteger(taps) || (taps as number) < 0 || (taps as number) > 200) return invalid();
-  if (!isNum(shake) || shake < 0 || shake > 1) return invalid();
+  // shake: null 이면 흔들기 센서 없음 → 연타만으로 점수 (11/7 결정)
+  if (shake !== null && (!isNum(shake) || shake < 0 || shake > 1)) return invalid();
   if (!isDemo && (!isNum(lat) || !isNum(lng) || !isNum(accuracy))) return invalid();
 
   const db = supabase();
@@ -72,10 +73,10 @@ export async function POST(req: Request) {
   const tempBefore = placeTemp(place, before, now).temp;
 
   // 4. 서버에서 점수를 다시 계산해 저장
-  const score = eventScore(taps as number, shake);
+  const score = eventScore(taps as number, shake as number | null);
   const { data: inserted, error: insErr } = await db
     .from('heat_events')
-    .insert({ place_id: placeId, device_id: deviceId, taps, shake, score, is_demo: isDemo })
+    .insert({ place_id: placeId, device_id: deviceId, taps, shake: shake ?? 0, score, is_demo: isDemo })
     .select('created_at')
     .single();
   if (insErr) throw insErr;
