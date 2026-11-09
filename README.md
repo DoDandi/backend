@@ -23,9 +23,9 @@ npm run seed             # data/zones.csv + data/places.csv → 카카오 검색
 
 | 메서드 · 경로 | 용도 |
 | --- | --- |
-| `GET /api/places` | 장소 목록 + 현재 온도 (`?category=`) |
+| `GET /api/places` | 장소 목록 + 현재 온도 (`?category=`, `?group=food\|festival\|sports\|etc`). 장소마다 `group` 포함 |
 | `GET /api/zones` | 구역 목록 + 현재 온도 |
-| `GET /api/places/[id]` | 장소 상세 |
+| `GET /api/places/[id]` | 장소 상세 (`group`, `vsBaseline` 평소 대비, `peers30m` 최근 30분 참여 기기 수 포함) |
 | `GET /api/places/[id]/timeline` | 최근 6시간 10분 단위 온도 |
 | `GET /api/places/[id]/posts` | 다음 검색 사진·블로그 (**11/1 회의에서 삭제 확정, 아직 코드에 남아 있음**) |
 | `POST /api/heat` | 열기 올리기 |

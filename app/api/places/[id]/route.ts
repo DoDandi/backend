@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
-import { PEERS_NOW_MIN, TIMELINE_STEP_MIN, WINDOW_MIN } from '@/lib/constants';
+import { CATEGORY_GROUP, PEERS_NOW_MIN, PEERS_RECENT_MIN, TIMELINE_STEP_MIN, WINDOW_MIN } from '@/lib/constants';
+import { distinctDevicesSince, vsBaseline } from '@/lib/stats';
 import { fetchEventsSince, placeTemp, supabase, toHeatEvent, type PlaceRow } from '@/lib/supabase';
 import { startOfTodayKST, toKSTISO } from '@/lib/time';
 
@@ -19,8 +20,8 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   const events = (await fetchEventsSince(new Date(todayStart.getTime() - WINDOW_MIN * 60_000), id)).map(toHeatEvent);
   const { temp, band } = placeTemp(place, events, now);
 
-  const peersSince = now.getTime() - PEERS_NOW_MIN * 60_000;
-  const peersNow = new Set(events.filter(e => e.createdAt.getTime() >= peersSince).map(e => e.deviceId)).size;
+  const peersNow = distinctDevicesSince(events, now, PEERS_NOW_MIN);
+  const peers30m = distinctDevicesSince(events, now, PEERS_RECENT_MIN);
 
   // 오늘 0시부터 10분 간격 + 지금 시점 중 최고 온도
   let todayPeak = { temp, at: toKSTISO(now) };
@@ -33,6 +34,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     id: place.id,
     name: place.name,
     category: place.category,
+    group: CATEGORY_GROUP[place.category],
     zoneId: place.zone_id,
     zoneName: place.zones?.name ?? null,
     description: place.description,
@@ -41,8 +43,10 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     lng: place.lng,
     temp,
     band,
+    vsBaseline: vsBaseline(temp),
     eventActive: place.event_active,
     peersNow,
+    peers30m,
     todayPeak,
   });
 }

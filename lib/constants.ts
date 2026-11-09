@@ -7,12 +7,15 @@ export const TEMP_PER_RATIO = 10;
 export const MAX_RATIO = 3;
 export const EVENT_BONUS = 5;
 export const TREND_BONUS = 3;
+// 평소 수준(반응 비율 1)의 온도. 장소 상세 "평소 대비"와 코스 후보 기준에 쓴다
+export const USUAL_TEMP = BASE_TEMP + TEMP_PER_RATIO;
 
 // 어뷰징 방지 (5장·7장)
 export const HEAT_RADIUS_M = 150;
 export const COOLDOWN_MIN = 5;
 export const HOURLY_LIMIT = 20;
 export const PEERS_NOW_MIN = 5;
+export const PEERS_RECENT_MIN = 30; // 장소 상세 "최근 참여 n명"
 
 // 열기 올리기 화면 (6장)
 export const TAP_DURATION_SEC = 10;
@@ -25,7 +28,7 @@ export const TIMELINE_STEP_MIN = 10;
 
 // 열기 코스 (5장)
 export const COURSE_RADIUS_KM = 1.5;
-export const COURSE_MIN_TEMP = 30;
+export const COURSE_MIN_TEMP = USUAL_TEMP; // 평소 수준 이상만 추천 (11/9 결정: 새 공식 기준 20°)
 export const COURSE_EXCLUDE_M = 50;
 export const COURSE_DIST_PENALTY = 10; // 온도 − 10 × 거리(km)
 export const COURSE_DEFAULT_LIMIT = 3;

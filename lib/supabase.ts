@@ -1,6 +1,6 @@
 import 'server-only';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-import { FEED_LIMIT, POST_IMAGE_BUCKET, WINDOW_MIN, type Category } from './constants';
+import { CATEGORY_GROUP, FEED_LIMIT, POST_IMAGE_BUCKET, WINDOW_MIN, type Category } from './constants';
 import { toPost, type Post, type PostRow } from './posts';
 import { band, temperature, type HeatEvent } from './temperature';
 
@@ -77,10 +77,11 @@ export function placeTemp(p: PlaceRow, events: HeatEvent[], now = new Date()) {
 }
 
 /** 장소 목록 + 현재 온도 (최근 30분 heat_events를 한 번에 가져와 장소별로 계산) */
-export async function placesWithTemps(category?: Category) {
+export async function placesWithTemps(filter?: { category?: Category; categories?: readonly Category[] }) {
   const now = new Date();
   let q = supabase().from('places').select('*').order('name');
-  if (category) q = q.eq('category', category);
+  if (filter?.category) q = q.eq('category', filter.category);
+  if (filter?.categories) q = q.in('category', filter.categories as Category[]);
   const [{ data, error }, rows] = await Promise.all([
     q,
     fetchEventsSince(new Date(now.getTime() - WINDOW_MIN * 60_000)),
@@ -92,6 +93,7 @@ export async function placesWithTemps(category?: Category) {
     zoneId: p.zone_id,
     name: p.name,
     category: p.category,
+    group: CATEGORY_GROUP[p.category],
     lat: p.lat,
     lng: p.lng,
     ...placeTemp(p, byPlace.get(p.id) ?? [], now),
