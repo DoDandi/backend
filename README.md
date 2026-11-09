@@ -27,7 +27,6 @@ npm run seed             # data/zones.csv + data/places.csv → 카카오 검색
 | `GET /api/zones` | 구역 목록 + 현재 온도 |
 | `GET /api/places/[id]` | 장소 상세 |
 | `GET /api/places/[id]/timeline` | 최근 6시간 10분 단위 온도 |
-| `GET /api/places/[id]/posts` | 다음 검색 사진·블로그 (**11/1 회의에서 삭제 확정, 아직 코드에 남아 있음**) |
 | `POST /api/heat` | 열기 올리기 |
 | `GET /api/course` | 열기 코스 (`lat`, `lng`, `limit`) |
 | `GET /api/me/footprints` | 내 발자국 (`deviceId`) |
