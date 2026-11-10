@@ -53,3 +53,29 @@ export function resolveVenue(venue: string, venues: Record<string, string>[]): s
   const hit = venues.find(v => v.external_name?.trim() === venue);
   return hit?.place_name?.trim() || venue;
 }
+
+/** KBL api.kbl.or.kr/match/list 응답 1건 (쓰는 필드만) */
+export type KblGame = {
+  gmkey: string;
+  gameDate: string; // YYYYMMDD
+  gameStart: string | null; // HHMM, 미정이면 비어 있음
+  stadiumname: string; // 예: '대구' — 야구 '대구'와 겹치므로 venue는 'KBL:대구'로 둔다
+  tnameH: string;
+  tnameA: string;
+};
+
+/** KBL 경기 1건 → 일정. 시작 시각이 미정이면 null */
+export function kblGameToDraft(g: KblGame): ScheduleDraft | null {
+  if (!/^\d{4}$/.test(g.gameStart ?? '') || !/^\d{8}$/.test(g.gameDate)) return null;
+  const date = `${g.gameDate.slice(0, 4)}-${g.gameDate.slice(4, 6)}-${g.gameDate.slice(6, 8)}`;
+  const startsAt = kst(date, `${g.gameStart!.slice(0, 2)}:${g.gameStart!.slice(2)}`);
+  return {
+    venue: `KBL:${g.stadiumname}`,
+    title: `${g.tnameH} vs ${g.tnameA}`,
+    kind: 'basketball',
+    source: 'kbl',
+    externalId: g.gmkey,
+    startsAt,
+    endsAt: defaultEnd('basketball', startsAt),
+  };
+}
