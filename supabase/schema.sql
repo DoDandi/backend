@@ -73,3 +73,23 @@ create index posts_device_time on posts (device_id, created_at desc);
 alter table posts enable row level security;
 grant select, insert, update, delete on table posts to service_role;
 insert into storage.buckets (id, name, public) values ('post-images', 'post-images', true) on conflict (id) do nothing;
+
+-- 일정 (경기·축제·버스킹). 이미 만든 DB라면 migration-005-schedules.sql만 실행한다
+create table schedules (
+  id           uuid primary key default gen_random_uuid(),
+  place_id     uuid not null references places(id) on delete cascade,
+  title        text not null,
+  kind         text not null check (kind in ('baseball','football','basketball','volleyball','festival','show','busking','etc')),
+  source       text not null check (source in ('kbo','kleague','festival','manual','demo')),
+  external_id  text,                                  -- 같은 일정을 다시 넣어도 중복되지 않게 (source별 고유)
+  starts_at    timestamptz not null,
+  ends_at      timestamptz not null,
+  created_at   timestamptz not null default now(),
+  check (ends_at > starts_at),
+  unique (source, external_id)
+);
+create index schedules_place_time on schedules (place_id, starts_at);
+create index schedules_time on schedules (starts_at, ends_at);
+
+alter table schedules enable row level security;
+grant select, insert, update, delete on table schedules to service_role;

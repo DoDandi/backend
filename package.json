@@ -9,7 +9,8 @@
     "lint": "eslint",
     "test": "vitest run",
     "seed": "tsx scripts/seed-places.ts",
-    "simulate": "tsx scripts/simulate.ts"
+    "simulate": "tsx scripts/simulate.ts",
+    "sync-schedules": "tsx scripts/sync-schedules.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.118.0",
