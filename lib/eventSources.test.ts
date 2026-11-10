@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { datesInWindow, festivalDrafts, parseKopisTimes, parseRuntimeMin, showDrafts, xmlBlocks, xmlTag } from './eventSources';
+import { datesInWindow, decodeHtml, exhibitionDrafts, festivalDrafts, isDaeguCulture, parseKopisTimes, parseRuntimeMin, showDrafts, xmlBlocks, xmlTag } from './eventSources';
 
 describe('parseKopisTimes', () => {
   it('요일 범위와 여러 시각', () => {
@@ -63,5 +63,20 @@ describe('xml', () => {
   it('태그 값과 반복 블록', () => {
     const x = '<dbs><db><a>1</a></db><db><a> 2 </a></db></dbs>';
     expect(xmlBlocks(x, 'db').map(b => xmlTag(b, 'a'))).toEqual(['1', '2']);
+  });
+});
+
+describe('전시 (문화예술공연 통합)', () => {
+  const item = { title: '피카소 &ndash; 초상', eventPeriod: '20261117 ~ 20270314', eventSite: '대구미술관', contactPoint: '대구미술관 053-803-7700', url: 'u1' };
+  it('대구 판별: 053 전화 또는 장소명', () => {
+    expect(isDaeguCulture(item)).toBe(true);
+    expect(isDaeguCulture({ ...item, eventSite: '교동아트미술관', contactPoint: '063-287-1245' })).toBe(false);
+  });
+  it('창 안의 날마다 10:00–18:00, 제목 엔티티 풀기', () => {
+    const d = exhibitionDrafts(item, { name: '대구미술관', lat: 35.83, lng: 128.68, address: null }, '2026-11-10', '2026-11-18');
+    expect(d.map(x => x.startsAt.toISOString())).toEqual(['2026-11-17T01:00:00.000Z', '2026-11-18T01:00:00.000Z']);
+    expect(d[0].endsAt.toISOString()).toBe('2026-11-17T09:00:00.000Z');
+    expect(d[0].title).toBe('피카소 – 초상');
+    expect(decodeHtml('a&middot;b')).toBe('a·b');
   });
 });
