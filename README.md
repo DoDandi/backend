@@ -27,7 +27,6 @@ npm run seed             # data/zones.csv + data/places.csv → 카카오 검색
 | `GET /api/zones` | 구역 목록 + 현재 온도 |
 | `GET /api/places/[id]` | 장소 상세 |
 | `GET /api/places/[id]/timeline` | 최근 6시간 10분 단위 온도 |
-| `GET /api/places/[id]/posts` | 다음 검색 사진·블로그 (**11/1 회의에서 삭제 확정, 아직 코드에 남아 있음**) |
 | `POST /api/heat` | 열기 올리기. 본문에 `accuracy`(m, 폰 위치 오차) 필수. 장소 종류별 반경(가게 30m · 시장·거리 80m · 공연·축제 150m · 경기장 300m), 오차 30m 넘으면 `403 LOW_ACCURACY`, 밖이면 `403 TOO_FAR` |
 | `GET /api/course` | 열기 코스 (`lat`, `lng`, `limit`) |
 | `GET /api/me/footprints` | 내 발자국 (`deviceId`) |
