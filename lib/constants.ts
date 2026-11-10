@@ -2,14 +2,14 @@
 export const WINDOW_MIN = 30;
 export const SYNC_WINDOW_SEC = 60;
 export const MAX_TAPS = 40;
-export const BASE_TEMP = 20;
+// 11/7 결정: T = 10 + 10 × min(R/B, 3) + E. 평소 수준(R = B)이면 20°
+export const BASE_TEMP = 10;
+export const NORMAL_TEMP = 20; // vsBaseline = 현재 열기 − 20°
 export const TEMP_PER_RATIO = 10;
 export const MAX_RATIO = 3;
 export const EVENT_BONUS = 5;
-export const TREND_BONUS = 3;
 
 // 어뷰징 방지 (5장·7장)
-export const HEAT_RADIUS_M = 150;
 export const COOLDOWN_MIN = 5;
 export const HOURLY_LIMIT = 20;
 export const PEERS_NOW_MIN = 5;
@@ -25,7 +25,7 @@ export const TIMELINE_STEP_MIN = 10;
 
 // 열기 코스 (5장)
 export const COURSE_RADIUS_KM = 1.5;
-export const COURSE_MIN_TEMP = 30;
+export const COURSE_MIN_TEMP = 20; // 11/7 결정: 20° 이상만 추천
 export const COURSE_EXCLUDE_M = 50;
 export const COURSE_DIST_PENALTY = 10; // 온도 − 10 × 거리(km)
 export const COURSE_DEFAULT_LIMIT = 3;
@@ -65,3 +65,40 @@ export const CATEGORY_BASELINE: Record<Category, number> = {
 export const ZONE_BASELINE = 20;
 // 확대 레벨이 이 값 이상(멀리 봄)이면 구역, 미만(가까이 봄)이면 매장을 그린다
 export const ZONE_LEVEL_THRESHOLD = 5;
+
+// 화면 필터 그룹 (11/7 결정). 묶는 일은 서버가 한다
+export const GROUPS = ['food', 'festival', 'sports', 'etc'] as const;
+export type Group = (typeof GROUPS)[number];
+
+export const CATEGORY_GROUP: Record<Category, Group> = {
+  food: 'food',
+  cafe: 'food',
+  market: 'food',
+  night_market: 'food',
+  festival: 'festival',
+  show: 'festival',
+  cheer: 'sports',
+  street: 'etc',
+};
+
+// 게시물 (사진 1장 + 글, 11/9 피그마 SCREEN 07·08)
+export const POST_TEXT_MAX = 300;
+export const POST_IMAGE_MAX_BYTES = 4 * 1024 * 1024; // Vercel 요청 한도 4.5MB 안. 프론트가 1280px JPEG로 줄여 보낸다
+export const POST_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp'] as const;
+export const POST_IMAGE_BUCKET = 'post-images';
+export const POST_DEFAULT_NICKNAME = '익명 사용자'; // 카카오 로그인 연결 전까지
+export const FEED_LIMIT = 30;
+
+// 현장 인증 (11/10 결정). 장소 종류별 반경 + GPS 오차 확인. 현장 테스트 후 숫자만 조정한다
+export const HEAT_RADIUS_BY_CATEGORY: Record<Category, number> = {
+  food: 30,
+  cafe: 30,
+  market: 80,
+  night_market: 80,
+  street: 80,
+  show: 150,
+  festival: 150,
+  cheer: 300,
+};
+// 폰이 알려 주는 위치 오차(m)가 이보다 크면 인증하지 않는다
+export const GPS_MAX_ACCURACY_M = 30;

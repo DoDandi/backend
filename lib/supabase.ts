@@ -1,6 +1,7 @@
 import 'server-only';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-import { WINDOW_MIN, type Category } from './constants';
+import { CATEGORY_GROUP, FEED_LIMIT, NORMAL_TEMP, POST_IMAGE_BUCKET, WINDOW_MIN, type Category } from './constants';
+import { toPost, type Post, type PostRow } from './posts';
 import { band, temperature, type HeatEvent } from './temperature';
 
 let client: SupabaseClient | null = null;
@@ -66,13 +67,35 @@ export function groupByPlace(rows: EventRow[]): Map<string, HeatEvent[]> {
   return m;
 }
 
+/** 평소(20°) 대비 몇 도 (소수 첫째 자리) */
+export const vsBaseline = (temp: number) => Math.round((temp - NORMAL_TEMP) * 10) / 10;
+
+/** 최근 30분 안에 참여한 서로 다른 기기 수 */
+export function peersIn(events: HeatEvent[], now: Date, minutes = WINDOW_MIN): number {
+  const since = now.getTime() - minutes * 60_000;
+  return new Set(events.filter(e => e.createdAt.getTime() >= since).map(e => e.deviceId)).size;
+}
+
 export function placeTemp(p: PlaceRow, events: HeatEvent[], now = new Date()) {
   const temp = temperature(
-    { baseline: Number(p.baseline), eventActive: p.event_active, trendSurge: p.trend_surge },
+    { baseline: Number(p.baseline), eventActive: p.event_active },
     events,
     now
   );
   return { temp, band: band(temp) };
+}
+
+function withExtras(t: { temp: number; band: string }, events: HeatEvent[], now: Date) {
+  return { ...t, vsBaseline: vsBaseline(t.temp), peers30m: peersIn(events, now) };
+}
+
+/** 장소별 최신 게시물 사진 (목록 썸네일용, 02-B). 최근 게시물 500개 안에서 찾는다 */
+async function latestPhotoByPlace(): Promise<Map<string, string>> {
+  const { data, error } = await supabase().from('posts').select('place_id, image_path').order('created_at', { ascending: false }).limit(500);
+  if (error) throw error;
+  const m = new Map<string, string>();
+  for (const r of data as { place_id: string; image_path: string }[]) if (!m.has(r.place_id)) m.set(r.place_id, postImageUrl(r.image_path));
+  return m;
 }
 
 /** 장소 목록 + 현재 온도 (최근 30분 heat_events를 한 번에 가져와 장소별로 계산) */
@@ -80,9 +103,10 @@ export async function placesWithTemps(category?: Category) {
   const now = new Date();
   let q = supabase().from('places').select('*').order('name');
   if (category) q = q.eq('category', category);
-  const [{ data, error }, rows] = await Promise.all([
+  const [{ data, error }, rows, photos] = await Promise.all([
     q,
     fetchEventsSince(new Date(now.getTime() - WINDOW_MIN * 60_000)),
+    latestPhotoByPlace(),
   ]);
   if (error) throw error;
   const byPlace = groupByPlace(rows);
@@ -91,10 +115,12 @@ export async function placesWithTemps(category?: Category) {
     zoneId: p.zone_id,
     name: p.name,
     category: p.category,
+    group: CATEGORY_GROUP[p.category],
     lat: p.lat,
     lng: p.lng,
-    ...placeTemp(p, byPlace.get(p.id) ?? [], now),
+    ...withExtras(placeTemp(p, byPlace.get(p.id) ?? [], now), byPlace.get(p.id) ?? [], now),
     eventActive: p.event_active,
+    photoUrl: photos.get(p.id) ?? null,
   }));
 }
 
@@ -136,7 +162,7 @@ export async function zonesWithTemps() {
 
   return (zones.data as ZoneRow[]).map(z => {
     const temp = temperature(
-      { baseline: Number(z.baseline), eventActive: z.event_active, trendSurge: z.trend_surge },
+      { baseline: Number(z.baseline), eventActive: z.event_active },
       eventsByZone.get(z.id) ?? [],
       now
     );
@@ -149,7 +175,29 @@ export async function zonesWithTemps() {
       radiusM: z.radius_m,
       temp,
       band: band(temp),
+      vsBaseline: vsBaseline(temp),
+      peers30m: peersIn(eventsByZone.get(z.id) ?? [], now),
       placeCount: placeCount.get(z.id) ?? 0,
     };
   });
+}
+
+/** 게시물 사진의 공개 주소 */
+export function postImageUrl(path: string): string {
+  return supabase().storage.from(POST_IMAGE_BUCKET).getPublicUrl(path).data.publicUrl;
+}
+
+/** 게시물 목록 (최신순). 장소 하나 또는 카테고리 묶음으로 거른다. before(ISO)보다 오래된 것만 → 다음 페이지 */
+export async function listPosts(opts: { placeId?: string; categories?: readonly Category[]; before?: string; limit?: number }): Promise<Post[]> {
+  let q = supabase()
+    .from('posts')
+    .select('id, place_id, nickname, image_path, text, created_at, places!inner(name, category)')
+    .order('created_at', { ascending: false })
+    .limit(opts.limit ?? FEED_LIMIT);
+  if (opts.placeId) q = q.eq('place_id', opts.placeId);
+  if (opts.categories) q = q.in('places.category', opts.categories as Category[]);
+  if (opts.before) q = q.lt('created_at', opts.before);
+  const { data, error } = await q;
+  if (error) throw error;
+  return (data as unknown as PostRow[]).map(r => toPost(r, postImageUrl));
 }

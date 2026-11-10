@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
-import { COOLDOWN_MIN, HEAT_RADIUS_M, HOURLY_LIMIT, SYNC_WINDOW_SEC, WINDOW_MIN } from '@/lib/constants';
-import { distanceM } from '@/lib/geo';
+import { COOLDOWN_MIN, GPS_MAX_ACCURACY_M, HEAT_RADIUS_BY_CATEGORY, HOURLY_LIMIT, SYNC_WINDOW_SEC, WINDOW_MIN } from '@/lib/constants';
+import { checkOnSite, distanceM } from '@/lib/geo';
 import { fetchEventsSince, placeTemp, supabase, toHeatEvent, type PlaceRow } from '@/lib/supabase';
 import { eventScore } from '@/lib/temperature';
 
@@ -12,14 +12,15 @@ const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFin
 export async function POST(req: Request) {
   const body = await req.json().catch(() => null);
   if (!body || typeof body !== 'object') return invalid();
-  const { placeId, deviceId, lat, lng, taps, shake } = body as Record<string, unknown>;
+  const { placeId, deviceId, lat, lng, accuracy, taps, shake } = body as Record<string, unknown>;
   const isDemo = !!process.env.DEMO_SECRET && req.headers.get('x-demo-secret') === process.env.DEMO_SECRET;
 
   // 1. 입력 검증
   if (typeof placeId !== 'string' || typeof deviceId !== 'string' || !deviceId) return invalid();
   if (!Number.isInteger(taps) || (taps as number) < 0 || (taps as number) > 200) return invalid();
-  if (!isNum(shake) || shake < 0 || shake > 1) return invalid();
-  if (!isDemo && (!isNum(lat) || !isNum(lng))) return invalid();
+  // shake: null 이면 흔들기 센서 없음 → 연타만으로 점수 (11/7 결정)
+  if (shake !== null && (!isNum(shake) || shake < 0 || shake > 1)) return invalid();
+  if (!isDemo && (!isNum(lat) || !isNum(lng) || !isNum(accuracy))) return invalid();
 
   const db = supabase();
   const { data: place } = await db.from('places').select('*').eq('id', placeId).maybeSingle<PlaceRow>();
@@ -28,9 +29,16 @@ export async function POST(req: Request) {
   const now = new Date();
 
   if (!isDemo) {
-    // 2. 거리 검사
+    // 2. 현장 인증: 장소 종류별 반경 + 위치 오차
+    const radiusM = HEAT_RADIUS_BY_CATEGORY[place.category];
     const d = distanceM({ lat: lat as number, lng: lng as number }, place);
-    if (d > HEAT_RADIUS_M) return NextResponse.json({ error: 'TOO_FAR', distanceM: Math.round(d) }, { status: 403 });
+    const site = checkOnSite(d, accuracy as number, radiusM, GPS_MAX_ACCURACY_M);
+    if (!site.ok) {
+      return NextResponse.json(
+        { error: site.reason, distanceM: site.distanceM, radiusM, accuracyM: Math.round(accuracy as number), maxAccuracyM: GPS_MAX_ACCURACY_M },
+        { status: 403 }
+      );
+    }
 
     // 3. 쿨다운: 같은 기기·같은 장소 5분에 1회, 기기당 1시간 20회
     const { data: mine, error } = await db
@@ -65,10 +73,10 @@ export async function POST(req: Request) {
   const tempBefore = placeTemp(place, before, now).temp;
 
   // 4. 서버에서 점수를 다시 계산해 저장
-  const score = eventScore(taps as number, shake);
+  const score = eventScore(taps as number, shake as number | null);
   const { data: inserted, error: insErr } = await db
     .from('heat_events')
-    .insert({ place_id: placeId, device_id: deviceId, taps, shake, score, is_demo: isDemo })
+    .insert({ place_id: placeId, device_id: deviceId, taps, shake: shake ?? 0, score, is_demo: isDemo })
     .select('created_at')
     .single();
   if (insErr) throw insErr;

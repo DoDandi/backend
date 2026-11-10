@@ -1,10 +1,12 @@
 import * as C from './constants';
 
 export type HeatEvent = { deviceId: string; score: number; createdAt: Date };
-export type PlaceInput = { baseline: number; eventActive: boolean; trendSurge: boolean };
+export type PlaceInput = { baseline: number; eventActive: boolean };
 
-export function eventScore(taps: number, shake: number): number {
+/** 1회 점수. 흔들기 센서가 없으면(shake = null) 연타만으로 최대 1점 */
+export function eventScore(taps: number, shake: number | null): number {
   const t = Math.min(Math.max(taps, 0) / C.MAX_TAPS, 1);
+  if (shake == null) return t;
   const s = Math.min(Math.max(shake, 0), 1);
   return 0.7 * t + 0.3 * s;
 }
@@ -32,15 +34,15 @@ export function reactionScore(events: HeatEvent[], now: Date): number {
 
 export function temperature(place: PlaceInput, events: HeatEvent[], now = new Date()): number {
   const ratio = Math.min(reactionScore(events, now) / place.baseline, C.MAX_RATIO);
-  const bonus = (place.eventActive ? C.EVENT_BONUS : 0) + (place.trendSurge ? C.TREND_BONUS : 0);
+  const bonus = place.eventActive ? C.EVENT_BONUS : 0; // 검색 급증 보너스는 11/1 결정으로 삭제
   return Math.round((C.BASE_TEMP + C.TEMP_PER_RATIO * ratio + bonus) * 10) / 10;
 }
 
 export type Band = 'mild' | 'warm' | 'hot' | 'daefrica';
 export function band(temp: number): Band {
-  if (temp >= 50) return 'daefrica';
-  if (temp >= 40) return 'hot';
-  if (temp >= 30) return 'warm';
+  if (temp >= 40) return 'daefrica';
+  if (temp >= 30) return 'hot';
+  if (temp >= 20) return 'warm';
   return 'mild';
 }
 
