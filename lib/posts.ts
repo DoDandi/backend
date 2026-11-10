@@ -1,4 +1,4 @@
-import { POST_DEFAULT_NICKNAME, POST_IMAGE_MAX_BYTES, POST_IMAGE_TYPES, POST_TEXT_MAX, type Category } from './constants';
+import { POST_COOLDOWN_MIN, POST_DEFAULT_NICKNAME, POST_IMAGE_MAX_BYTES, POST_IMAGE_TYPES, POST_TEXT_MAX, type Category } from './constants';
 
 /** 화면에 내려주는 게시물 (프론트 lib/posts.ts의 Post와 같은 모양) */
 export type Post = {
@@ -69,4 +69,11 @@ export function profileFrom(meta: Record<string, unknown> | undefined): { nickna
     nickname: (str(m.name) ?? str(m.full_name) ?? str(m.preferred_username) ?? str(m.user_name) ?? POST_DEFAULT_NICKNAME).slice(0, 30),
     avatarUrl: str(m.avatar_url) ?? str(m.picture),
   };
+}
+
+/** 마지막 글 시각 → 다시 남길 수 있을 때까지 남은 초. 지금 남길 수 있으면 0 */
+export function postRetryAfterSec(lastAt: Date | null, now = new Date()): number {
+  if (!lastAt) return 0;
+  const left = lastAt.getTime() + POST_COOLDOWN_MIN * 60_000 - now.getTime();
+  return left > 0 ? Math.ceil(left / 1000) : 0;
 }
