@@ -9,7 +9,7 @@
 import { config } from 'dotenv';
 import { readFileSync } from 'node:fs';
 import { createClient } from '@supabase/supabase-js';
-import { CATEGORIES, CATEGORY_BASELINE, DEFAULT_CENTER, ZONE_BASELINE, type Category } from '../lib/constants';
+import { CATEGORIES, CATEGORY_BASELINE, ZONE_BASELINE, type Category } from '../lib/constants';
 import { distanceM, type LatLng } from '../lib/geo';
 
 config({ path: '.env.local' });
@@ -21,8 +21,9 @@ if (!KAKAO_REST_API_KEY || !NEXT_PUBLIC_SUPABASE_URL || !SUPABASE_SERVICE_ROLE_K
 }
 const db = createClient(NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } });
 
-// 키워드 검색 범위: 동성로 중심 15km (대구 시내. 다른 도시의 같은 이름 장소가 잡히지 않게)
-const SEARCH_RADIUS_M = 15_000;
+// 키워드 검색 범위: 대구시 전체 사각형 (군위군 제외). 다른 도시의 같은 이름 장소가 잡히지 않게.
+// 카카오 키워드 검색 반경은 최대 20km라 팔공산·현풍 같은 외곽이 빠져서 사각형(rect)으로 찾는다
+const DAEGU_RECT = '128.35,35.60,128.80,36.02';
 const ZONE_MIN_RADIUS_M = 150;
 const ZONE_MARGIN_M = 60;
 // 원도심 구역끼리 원이 크게 겹치지 않도록 반경 상한 (자동 매장 수집도 이 반경 안에서만)
@@ -153,9 +154,7 @@ async function main() {
     }
     const [doc] = await kakao('keyword', {
       query: r.search_keyword || r.name,
-      x: DEFAULT_CENTER.lng,
-      y: DEFAULT_CENTER.lat,
-      radius: SEARCH_RADIUS_M,
+      rect: DAEGU_RECT,
       size: 1,
     });
     if (!doc) {
