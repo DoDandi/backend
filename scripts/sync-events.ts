@@ -1,18 +1,19 @@
 // 외부 행사 → schedules (TourAPI 축제, KOPIS 공연). 사용자 요청 때는 외부 API를 부르지 않고 이 스크립트로 미리 넣는다.
 //
 // 실행
-//   npm run sync-events                    축제·공연 둘 다, 오늘부터 30일
-//   npm run sync-events -- --source kopis  한쪽만 (tour | kopis)
+//   npm run sync-events                    축제·공연·전시 모두, 오늘부터 30일
+//   npm run sync-events -- --source kopis  하나만 (tour | kopis | exhibition)
 //   npm run sync-events -- --days 14       기간
 //   npm run sync-events -- --dry-run       DB에 쓰지 않고 출력만
 //
-// 장소 연결: 이름이 같은 장소, 또는 공연은 100m 안의 공연장(show)·축제는 150m 안의 길잡이 장소(가게가 아닌 곳)에 붙이고,
-//           없으면 행사장·공연장을 장소로 새로 만든다 (축제 → festival, 공연 → show).
-// 필요 키: TOUR_API_KEY(공공데이터포털, 국문 관광정보 서비스_GW), KOPIS_API_KEY(kopis.or.kr)
+// 장소 연결: 이름이 같은 장소, 또는 공연·전시는 100m 안의 공연장(show)·축제는 150m 안의 길잡이 장소(가게가 아닌 곳)에 붙이고,
+//           없으면 행사장·공연장을 장소로 새로 만든다 (축제 → festival, 공연·전시 → show).
+// 필요 키: TOUR_API_KEY(공공데이터포털, 국문 관광정보 서비스_GW), KOPIS_API_KEY(kopis.or.kr),
+//          SERVICE_KEY(문화공공데이터광장, 문화체육관광부_문화예술공연(통합) CNV_060), KAKAO_REST_API_KEY(전시 장소 좌표)
 import { config } from 'dotenv';
 import { createClient } from '@supabase/supabase-js';
 import { CATEGORY_BASELINE, type Category } from '../lib/constants';
-import { festivalDrafts, showDrafts, xmlBlocks, xmlTag, type EventDraft, type KopisVenue, type TourFestival } from '../lib/eventSources';
+import { decodeHtml, exhibitionDrafts, festivalDrafts, isDaeguCulture, showDrafts, xmlBlocks, xmlTag, type CultureItem, type EventDraft, type KopisVenue, type TourFestival } from '../lib/eventSources';
 import { distanceM } from '../lib/geo';
 import { toKSTISO } from '../lib/time';
 
@@ -29,9 +30,10 @@ const DAYS = Number(opt('days') ?? 30);
 const DAEGU_LDONG = '27'; // TourAPI 법정동 시도 코드
 const DAEGU_KOPIS = '27'; // KOPIS 시도 코드
 const MATCH_RADIUS_M = 150;
+const DAEGU_RECT = '128.35,35.60,128.80,36.02'; // 카카오 검색 범위 (시드와 같음)
 const SHOW_MATCH_RADIUS_M = 100;
 
-const { TOUR_API_KEY, KOPIS_API_KEY, NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY } = process.env;
+const { TOUR_API_KEY, KOPIS_API_KEY, SERVICE_KEY, KAKAO_REST_API_KEY, NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY } = process.env;
 if (!NEXT_PUBLIC_SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) throw new Error('.env.local 에 Supabase 키가 필요합니다');
 const db = createClient(NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } });
 
@@ -115,6 +117,40 @@ async function kopisShows(): Promise<EventDraft[]> {
   return drafts;
 }
 
+/**
+ * 문화체육관광부 문화예술공연(통합) API(문화공공데이터광장 CNV_060, dtype=전시) → 대구 전시.
+ * 전국 데이터라 최근 등록 1,000건에서 대구(053 전화·장소명)만 고르고, 장소 좌표는 카카오에서 대구 범위로 찾는다.
+ * 10초에 1번만 부를 수 있어 한 번만 부른다
+ */
+async function cultureExhibitions(): Promise<EventDraft[]> {
+  if (!SERVICE_KEY || !KAKAO_REST_API_KEY) throw new Error('SERVICE_KEY(문화공공데이터광장), KAKAO_REST_API_KEY 가 필요합니다');
+  const q = new URLSearchParams({ serviceKey: SERVICE_KEY, numOfRows: '1000', pageNo: '1', dtype: '전시', title: '' });
+  const res = await fetch(`https://api.kcisa.kr/openapi/CNV_060/request?${q}`, { headers: { Accept: 'application/json' } });
+  if (!res.ok) throw new Error(`문화예술공연 API ${res.status}`);
+  const items: CultureItem[] = (await res.json()).response?.body?.items?.item ?? [];
+  const venues = new Map<string, KopisVenue | null>();
+  const drafts: EventDraft[] = [];
+  for (const i of items.filter(isDaeguCulture)) {
+    const site = i.eventSite ? decodeHtml(i.eventSite) : '';
+    if (!site) continue;
+    if (!venues.has(site)) {
+      // "갤러리A&갤러리B"처럼 이름이 붙어 있으면 앞 이름으로 한 번 더 찾는다
+      let doc = null;
+      for (const query of [...new Set([site, site.split('&')[0].trim()])]) {
+        const kq = new URLSearchParams({ query, rect: DAEGU_RECT, size: '1' });
+        const kr = await fetch(`https://dapi.kakao.com/v2/local/search/keyword.json?${kq}`, { headers: { Authorization: `KakaoAK ${KAKAO_REST_API_KEY}` } });
+        doc = kr.ok ? (await kr.json()).documents?.[0] : null;
+        if (doc) break;
+      }
+      venues.set(site, doc ? { name: site, lat: Number(doc.y), lng: Number(doc.x), address: doc.road_address_name || doc.address_name || null } : null);
+      if (!doc) console.warn(`  ✗ 전시 장소를 카카오에서 못 찾음: ${site}`);
+    }
+    const venue = venues.get(site);
+    if (venue) drafts.push(...exhibitionDrafts(i, venue, today, until));
+  }
+  return drafts;
+}
+
 type PlaceLite = { id: string; name: string; category: Category; lat: number; lng: number };
 type ZoneLite = { id: string; lat: number; lng: number; radius_m: number };
 
@@ -122,6 +158,7 @@ async function main() {
   const drafts = [
     ...(SOURCE === 'all' || SOURCE === 'tour' ? await tourFestivals() : []),
     ...(SOURCE === 'all' || SOURCE === 'kopis' ? await kopisShows() : []),
+    ...(SOURCE === 'all' || SOURCE === 'exhibition' ? await cultureExhibitions() : []),
   ];
   console.log(`${today} ~ ${until} 일정 ${drafts.length}건${DRY_RUN ? ' (dry-run, DB에 쓰지 않음)' : ''}`);
 
@@ -137,16 +174,16 @@ async function main() {
   for (const d of drafts) {
     const key = `${d.venueName}|${d.lat.toFixed(4)}|${d.lng.toFixed(4)}`;
     if (placeFor.has(key)) continue;
-    // 공연은 공연장(show) 장소에만 붙인다 (근처 골목·시장에 붙지 않게). 축제는 근처 길잡이 장소(공원·거리 등)에 붙인다
+    // 공연·전시는 공연장(show) 장소에만 붙인다 (근처 골목·시장에 붙지 않게). 축제는 근처 길잡이 장소(공원·거리 등)에 붙인다
     const canMatch = (p: PlaceLite) =>
-      d.kind === 'show'
+      d.kind !== 'festival'
         ? p.category === 'show' && distanceM(p, d) <= SHOW_MATCH_RADIUS_M
         : p.category !== 'food' && p.category !== 'cafe' && distanceM(p, d) <= MATCH_RADIUS_M;
     const near = pool
       .filter(p => p.name === d.venueName || canMatch(p))
       .sort((a, b) => distanceM(a, d) - distanceM(b, d))[0];
     if (near) console.log(`  = 기존 장소에 연결: ${d.venueName} → ${near.name} (${Math.round(distanceM(near, d))}m)`);
-    placeFor.set(key, near ?? { new: true, name: d.venueName, category: d.kind, lat: d.lat, lng: d.lng, address: d.address });
+    placeFor.set(key, near ?? { new: true, name: d.venueName, category: d.kind === 'festival' ? 'festival' : 'show', lat: d.lat, lng: d.lng, address: d.address });
   }
 
   let created = 0;

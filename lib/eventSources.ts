@@ -47,8 +47,8 @@ export function parseRuntimeMin(raw: string): number | null {
 }
 
 export type EventDraft = {
-  source: 'festival' | 'kopis';
-  kind: 'festival' | 'show';
+  source: 'festival' | 'kopis' | 'exhibition';
+  kind: 'festival' | 'show' | 'exhibition';
   externalId: string;
   title: string;
   venueName: string;
@@ -116,6 +116,34 @@ export function showDrafts(s: KopisShow, venue: KopisVenue, winFrom: string, win
     }
   }
   return out;
+}
+
+/** 문화체육관광부 문화예술공연(통합) API 한 건 (dtype=전시) */
+export type CultureItem = { title: string; eventPeriod: string | null; eventSite: string | null; contactPoint: string | null; url: string | null };
+
+/** 대구 전시인가: 문의 전화가 053(대구 지역번호)이거나 장소명에 '대구' */
+export const isDaeguCulture = (i: CultureItem) => /(^|\D)053-/.test(i.contactPoint ?? '') || /대구/.test(i.eventSite ?? '');
+
+const ENTITIES: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', '#39': "'", ndash: '–', mdash: '—', lsquo: '‘', rsquo: '’', ldquo: '“', rdquo: '”', middot: '·', nbsp: ' ' };
+export const decodeHtml = (s: string) => s.replace(/&([#\w]+);/g, (m, k) => ENTITIES[k] ?? m).trim();
+
+/** 전시 1건 → 창 안의 날마다 10:00–18:00 일정. 기간("20261110 ~ 20261115")을 못 읽으면 없음 */
+export function exhibitionDrafts(i: CultureItem, venue: KopisVenue, winFrom: string, winTo: string): EventDraft[] {
+  const m = i.eventPeriod?.match(/(\d{8})\s*~\s*(\d{8})/);
+  if (!m) return [];
+  const title = decodeHtml(i.title);
+  return datesInWindow(isoDate(m[1]), isoDate(m[2]), winFrom, winTo).map(date => ({
+    source: 'exhibition',
+    kind: 'exhibition',
+    externalId: `${i.url ?? title}|${date}`,
+    title,
+    venueName: venue.name,
+    lat: venue.lat,
+    lng: venue.lng,
+    address: venue.address,
+    startsAt: kst(date, '10:00'),
+    endsAt: kst(date, '18:00'),
+  }));
 }
 
 /** 아주 단순한 XML 태그 값 읽기 (KOPIS 응답용) */
