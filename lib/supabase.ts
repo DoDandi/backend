@@ -1,10 +1,10 @@
 import 'server-only';
 import { distanceM, type Bbox, type LatLng } from './geo';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-import { CATEGORY_GROUP, FEED_LIMIT, NORMAL_TEMP, POST_IMAGE_BUCKET, SCHEDULE_LEAD_MIN, WINDOW_MIN, type Category, type ScheduleKind } from './constants';
+import { CATEGORY_GROUP, FEED_LIMIT, NORMAL_TEMP, POPULAR_DAYS, POST_IMAGE_BUCKET, SCHEDULE_LEAD_MIN, WINDOW_MIN, type Category, type ScheduleKind } from './constants';
 import { toPost, type Post, type PostRow } from './posts';
 import { groupSchedulesByPlace, hasActiveSchedule, type Schedule } from './schedules';
-import { band, temperature, type HeatEvent } from './temperature';
+import { band, dayStart, popularityBonus, popularityScore, temperature, type HeatEvent } from './temperature';
 
 let client: SupabaseClient | null = null;
 
@@ -69,6 +69,24 @@ export function groupByPlace(rows: EventRow[]): Map<string, HeatEvent[]> {
   return m;
 }
 
+let popularCache: { day: number; byPlace: Map<string, number> } | null = null;
+
+/** 장소별 인기 점수 (지난 7일). 하루 안에서는 바뀌지 않으므로 하루 경계(새벽 5시)마다 한 번만 계산한다 */
+export async function popularityByPlace(now = new Date()): Promise<Map<string, number>> {
+  const today = dayStart(now).getTime();
+  if (popularCache?.day === today) return popularCache.byPlace;
+  const rows = await fetchEventsSince(new Date(today - POPULAR_DAYS * 86_400_000));
+  const byPlace = new Map<string, number>();
+  for (const [placeId, events] of groupByPlace(rows)) byPlace.set(placeId, popularityScore(events, now));
+  popularCache = { day: today, byPlace };
+  return byPlace;
+}
+
+/** 이 장소의 인기 보너스 P (°) */
+export function placePopularity(p: Pick<PlaceRow, 'id' | 'baseline'>, scores: Map<string, number>): number {
+  return popularityBonus(scores.get(p.id) ?? 0, Number(p.baseline));
+}
+
 /** 평소(20°) 대비 몇 도 (소수 첫째 자리) */
 export const vsBaseline = (temp: number) => Math.round((temp - NORMAL_TEMP) * 10) / 10;
 
@@ -83,9 +101,9 @@ export function placeEventActive(p: Pick<PlaceRow, 'event_active'>, schedules: r
   return p.event_active || hasActiveSchedule(schedules, now);
 }
 
-export function placeTemp(p: PlaceRow, events: HeatEvent[], now = new Date(), schedules: readonly Schedule[] = []) {
+export function placeTemp(p: PlaceRow, events: HeatEvent[], now = new Date(), schedules: readonly Schedule[] = [], popularity = 0) {
   const temp = temperature(
-    { baseline: Number(p.baseline), eventActive: placeEventActive(p, schedules, now) },
+    { baseline: Number(p.baseline), eventActive: placeEventActive(p, schedules, now), popularity },
     events,
     now
   );
@@ -141,11 +159,12 @@ export async function placesWithTemps(category?: Category, opts: { bbox?: Bbox |
     q = q.gte('lat', b.minLat).lte('lat', b.maxLat).gte('lng', b.minLng).lte('lng', b.maxLng);
   }
   if (opts.zoneId) q = q.eq('zone_id', opts.zoneId);
-  const [{ data, error }, rows, photos, schedules] = await Promise.all([
+  const [{ data, error }, rows, photos, schedules, popular] = await Promise.all([
     q,
     fetchEventsSince(new Date(now.getTime() - WINDOW_MIN * 60_000)),
     latestPhotoByPlace(),
     fetchSchedules(now, now),
+    popularityByPlace(now),
   ]);
   if (error) throw error;
   const byPlace = groupByPlace(rows);
@@ -158,7 +177,11 @@ export async function placesWithTemps(category?: Category, opts: { bbox?: Bbox |
     group: CATEGORY_GROUP[p.category],
     lat: p.lat,
     lng: p.lng,
-    ...withExtras(placeTemp(p, byPlace.get(p.id) ?? [], now, schedulesByPlace.get(p.id) ?? []), byPlace.get(p.id) ?? [], now),
+    ...withExtras(
+      placeTemp(p, byPlace.get(p.id) ?? [], now, schedulesByPlace.get(p.id) ?? [], placePopularity(p, popular)),
+      byPlace.get(p.id) ?? [],
+      now
+    ),
     eventActive: placeEventActive(p, schedulesByPlace.get(p.id) ?? [], now),
     photoUrl: photos.get(p.id) ?? null,
   }));
@@ -191,11 +214,12 @@ export async function zoneAt(p: LatLng): Promise<string | null> {
 /** 구역 목록 + 현재 온도. 구역 안 모든 장소의 반응을 합쳐 같은 엔진으로 계산 (동시성도 구역 단위) */
 export async function zonesWithTemps() {
   const now = new Date();
-  const [zones, places, rows, schedules] = await Promise.all([
+  const [zones, places, rows, schedules, popular] = await Promise.all([
     supabase().from('zones').select('*').not('lat', 'is', null).order('name'),
     supabase().from('places').select('id, zone_id'),
     fetchEventsSince(new Date(now.getTime() - WINDOW_MIN * 60_000)),
     fetchSchedules(now, now),
+    popularityByPlace(now),
   ]);
   if (zones.error) throw zones.error;
   if (places.error) throw places.error;
@@ -209,6 +233,13 @@ export async function zonesWithTemps() {
     schedules.filter(s => hasActiveSchedule([s], now)).map(s => zoneOf.get(s.placeId)).filter((z): z is string => !!z)
   );
 
+  // 구역 인기 점수 = 구역 안 장소 인기 점수의 합 (반응을 합쳐 R을 구하는 것과 같은 방식)
+  const popularByZone = new Map<string, number>();
+  for (const [placeId, score] of popular) {
+    const z = zoneOf.get(placeId);
+    if (z) popularByZone.set(z, (popularByZone.get(z) ?? 0) + score);
+  }
+
   const eventsByZone = new Map<string, HeatEvent[]>();
   for (const r of rows) {
     const z = zoneOf.get(r.place_id);
@@ -220,7 +251,11 @@ export async function zonesWithTemps() {
 
   return (zones.data as ZoneRow[]).map(z => {
     const temp = temperature(
-      { baseline: Number(z.baseline), eventActive: z.event_active || zoneWithSchedule.has(z.id) },
+      {
+        baseline: Number(z.baseline),
+        eventActive: z.event_active || zoneWithSchedule.has(z.id),
+        popularity: popularityBonus(popularByZone.get(z.id) ?? 0, Number(z.baseline)),
+      },
       eventsByZone.get(z.id) ?? [],
       now
     );
