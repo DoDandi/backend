@@ -1,6 +1,6 @@
-# 열기지도 백엔드 (yeolgi-map-backend)
+# 열기단디도 백엔드 (yeolgi-map-backend)
 
-대구 원도심의 "지금 살아 있는 현장"을 온도로 보여주는 열기지도의 API 서버입니다. Next.js Route Handler + Supabase(Postgres)로 동작합니다.
+대구 원도심의 "지금 살아 있는 현장"을 온도로 보여주는 열기단디도의 API 서버입니다. Next.js Route Handler + Supabase(Postgres)로 동작합니다.
 
 - 화면은 [DoDandi/frontend](https://github.com/DoDandi/frontend) 저장소에 있습니다. 프론트는 `/api/...` 요청을 이 서버로 넘겨줍니다(Next rewrites).
 - 원래 하나였던 프로토타입(`Kjaemin339/yeolgi-map` 커밋 `4418821`)을 백엔드·프론트로 나눈 것입니다.
