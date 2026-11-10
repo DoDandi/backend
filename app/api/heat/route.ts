@@ -3,7 +3,7 @@ import { CATEGORY_BASELINE, COOLDOWN_MIN, GPS_MAX_ACCURACY_M, HEAT_RADIUS_BY_CAT
 import { checkOnSite, distanceM } from '@/lib/geo';
 import { findShopNear } from '@/lib/kakao';
 import { shopCategory } from '@/lib/shops';
-import { fetchEventsSince, fetchSchedules, placeTemp, supabase, toHeatEvent, zoneAt, type PlaceRow } from '@/lib/supabase';
+import { fetchEventsSince, fetchSchedules, placePopularity, placeTemp, popularityByPlace, supabase, toHeatEvent, zoneAt, type PlaceRow } from '@/lib/supabase';
 import { eventScore } from '@/lib/temperature';
 
 export const dynamic = 'force-dynamic';
@@ -116,12 +116,14 @@ export async function POST(req: Request) {
   const id = saved.id;
 
   // 저장 전 온도
-  const [beforeRows, schedules] = await Promise.all([
+  const [beforeRows, schedules, popular] = await Promise.all([
     fetchEventsSince(new Date(now.getTime() - WINDOW_MIN * 60_000), id),
     fetchSchedules(now, new Date(now.getTime() + 60_000), id),
+    popularityByPlace(now),
   ]);
   const before = beforeRows.map(toHeatEvent);
-  const tempBefore = placeTemp(saved, before, now, schedules).temp;
+  const popularity = placePopularity(saved, popular);
+  const tempBefore = placeTemp(saved, before, now, schedules, popularity).temp;
 
   // 4. 서버에서 점수를 다시 계산해 저장
   const score = eventScore(taps as number, shake as number | null);
@@ -137,7 +139,7 @@ export async function POST(req: Request) {
   const after = [...before, { deviceId, score, createdAt }];
   // DB 시각이 앱 서버 시각보다 약간 앞설 수 있어, 새 기록이 빠지지 않도록 더 늦은 쪽을 기준으로 계산
   const afterNow = new Date(Math.max(Date.now(), createdAt.getTime()));
-  const tempAfter = placeTemp(saved, after, afterNow, schedules).temp;
+  const tempAfter = placeTemp(saved, after, afterNow, schedules, popularity).temp;
   const syncSince = afterNow.getTime() - SYNC_WINDOW_SEC * 1000;
   const peers = new Set(after.filter(e => e.createdAt.getTime() >= syncSince).map(e => e.deviceId)).size;
 

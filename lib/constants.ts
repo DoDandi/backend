@@ -2,7 +2,7 @@
 export const WINDOW_MIN = 30;
 export const SYNC_WINDOW_SEC = 60;
 export const MAX_TAPS = 40;
-// 11/7 결정: T = 10 + 10 × min(R/B, 3) + E. 평소 수준(R = B)이면 20°
+// 11/7 결정: T = 10 + 10 × min(R/B, 3) + E + P. 평소 수준(R = B)이면 20°
 export const BASE_TEMP = 10;
 export const NORMAL_TEMP = 20; // vsBaseline = 현재 열기 − 20°
 export const TEMP_PER_RATIO = 10;
@@ -10,6 +10,13 @@ export const MAX_RATIO = 3;
 export const EVENT_BONUS = 5;
 // 일정 보너스: 시작 SCHEDULE_LEAD_MIN분 전부터 끝날 때까지 EVENT_BONUS를 켠다 (노션 2-3·5)
 export const SCHEDULE_LEAD_MIN = 60;
+// 인기 보너스 P (발표자료 Engine 장표, 11/4 회의 안건 1 추천안): 지난 7일 열기 점수를 하루마다 절반으로 줄여 더하고,
+// 그 합이 평소값 B의 POPULAR_FULL_RATIO배면 최대 +5°. 오늘 반응은 R에 들어가므로 빼고, 하루 경계는 새벽 5시(KST). 현장 테스트 후 숫자만 조정
+export const POPULAR_BONUS_MAX = 5;
+export const POPULAR_DAYS = 7;
+export const POPULAR_DAY_DECAY = 0.5;
+export const POPULAR_FULL_RATIO = 10;
+export const DAY_START_HOUR_KST = 5;
 
 // 어뷰징 방지 (5장·7장)
 export const COOLDOWN_MIN = 5;
