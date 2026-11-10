@@ -188,16 +188,26 @@ export function postImageUrl(path: string): string {
 }
 
 /** 게시물 목록 (최신순). 장소 하나 또는 카테고리 묶음으로 거른다. before(ISO)보다 오래된 것만 → 다음 페이지 */
-export async function listPosts(opts: { placeId?: string; categories?: readonly Category[]; before?: string; limit?: number }): Promise<Post[]> {
+export async function listPosts(opts: {
+  placeId?: string;
+  categories?: readonly Category[];
+  before?: string;
+  limit?: number;
+  /** 이 사용자가 쓴 글만 */
+  userId?: string;
+  /** 보고 있는 로그인 사용자 (mine 표시) */
+  viewerId?: string | null;
+}): Promise<Post[]> {
   let q = supabase()
     .from('posts')
-    .select('id, place_id, nickname, image_path, text, created_at, places!inner(name, category)')
+    .select('id, place_id, user_id, nickname, avatar_url, image_path, text, created_at, places!inner(name, category)')
     .order('created_at', { ascending: false })
     .limit(opts.limit ?? FEED_LIMIT);
   if (opts.placeId) q = q.eq('place_id', opts.placeId);
   if (opts.categories) q = q.in('places.category', opts.categories as Category[]);
   if (opts.before) q = q.lt('created_at', opts.before);
+  if (opts.userId) q = q.eq('user_id', opts.userId);
   const { data, error } = await q;
   if (error) throw error;
-  return (data as unknown as PostRow[]).map(r => toPost(r, postImageUrl));
+  return (data as unknown as PostRow[]).map(r => toPost(r, postImageUrl, opts.viewerId ?? null));
 }

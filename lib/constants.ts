@@ -86,7 +86,7 @@ export const POST_TEXT_MAX = 300;
 export const POST_IMAGE_MAX_BYTES = 4 * 1024 * 1024; // Vercel 요청 한도 4.5MB 안. 프론트가 1280px JPEG로 줄여 보낸다
 export const POST_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp'] as const;
 export const POST_IMAGE_BUCKET = 'post-images';
-export const POST_DEFAULT_NICKNAME = '익명 사용자'; // 카카오 로그인 연결 전까지
+export const POST_DEFAULT_NICKNAME = '익명 사용자'; // 카카오 프로필에 닉네임이 없을 때
 export const FEED_LIMIT = 30;
 
 // 현장 인증 (11/10 결정). 장소 종류별 반경 + GPS 오차 확인. 현장 테스트 후 숫자만 조정한다
