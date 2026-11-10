@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { authUser } from '@/lib/auth';
 import { POST_IMAGE_BUCKET } from '@/lib/constants';
-import { imagePath, validatePostInput } from '@/lib/posts';
+import { imagePath, postRetryAfterSec, validatePostInput } from '@/lib/posts';
 import { listPosts, supabase } from '@/lib/supabase';
 
 export const dynamic = 'force-dynamic';
@@ -41,6 +41,20 @@ export async function POST(req: Request, { params }: Ctx) {
   const db = supabase();
   const { data: place } = await db.from('places').select('id, name, category').eq('id', id).maybeSingle();
   if (!place) return NextResponse.json({ error: 'NOT_FOUND' }, { status: 404 });
+
+  // 같은 사람·같은 장소는 30분에 1개 (연속 업로드·도배 방지)
+  const { data: last } = await db
+    .from('posts')
+    .select('created_at')
+    .eq('user_id', user.id)
+    .eq('place_id', id)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const retryAfterSec = postRetryAfterSec(last ? new Date(last.created_at) : null);
+  if (retryAfterSec > 0) {
+    return NextResponse.json({ error: 'COOLDOWN', retryAfterSec }, { status: 429, headers: { 'Retry-After': String(retryAfterSec) } });
+  }
 
   // 1) 사진을 Storage에 올리고 2) 게시물 행을 넣는다. 행 저장이 실패하면 올린 사진을 지운다
   const path = imagePath(id, file.type);

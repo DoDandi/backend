@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { imagePath, profileFrom, toPost, validatePostInput, type PostRow } from './posts';
+import { imagePath, postRetryAfterSec, profileFrom, toPost, validatePostInput, type PostRow } from './posts';
 
 const jpg = { type: 'image/jpeg', size: 300_000 };
 
@@ -80,5 +80,16 @@ describe('profileFrom', () => {
   it('없으면 기본 닉네임', () => {
     expect(profileFrom(undefined)).toEqual({ nickname: '익명 사용자', avatarUrl: null });
     expect(profileFrom({ name: '  ' })).toEqual({ nickname: '익명 사용자', avatarUrl: null });
+  });
+});
+
+describe('postRetryAfterSec', () => {
+  const now = new Date('2026-11-10T08:00:00Z');
+  it('처음이거나 30분이 지났으면 0', () => {
+    expect(postRetryAfterSec(null, now)).toBe(0);
+    expect(postRetryAfterSec(new Date('2026-11-10T07:30:00Z'), now)).toBe(0);
+  });
+  it('49초 전에 남겼으면 29분 11초 남음', () => {
+    expect(postRetryAfterSec(new Date('2026-11-10T07:59:11Z'), now)).toBe(30 * 60 - 49);
   });
 });

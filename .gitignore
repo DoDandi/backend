@@ -40,3 +40,8 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# macOS/iCloud가 만드는 중복 사본 (예: "Foo 2.ts")
+* [0-9].ts
+* [0-9].tsx
+* [0-9].sql
