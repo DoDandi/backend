@@ -1,9 +1,8 @@
 import { NextResponse } from 'next/server';
-import { CATEGORY_BASELINE, COOLDOWN_MIN, GPS_MAX_ACCURACY_M, HEAT_RADIUS_BY_CATEGORY, HOURLY_LIMIT, KAKAO_VERIFY_RADIUS_M, SYNC_WINDOW_SEC, WINDOW_MIN } from '@/lib/constants';
+import { COOLDOWN_MIN, GPS_MAX_ACCURACY_M, HEAT_RADIUS_BY_CATEGORY, HOURLY_LIMIT, SYNC_WINDOW_SEC, WINDOW_MIN } from '@/lib/constants';
 import { checkOnSite, distanceM } from '@/lib/geo';
-import { findShopNear } from '@/lib/kakao';
-import { shopCategory } from '@/lib/shops';
-import { fetchEventsSince, fetchSchedules, placePopularity, placeTemp, popularityByPlace, supabase, toHeatEvent, zoneAt, type PlaceRow } from '@/lib/supabase';
+import { findKakaoShop, saveKakaoShop, type NewShop } from '@/lib/kakaoPlaces';
+import { fetchEventsSince, fetchSchedules, placePopularity, placeTemp, popularityByPlace, supabase, toHeatEvent, type PlaceRow } from '@/lib/supabase';
 import { eventScore } from '@/lib/temperature';
 
 export const dynamic = 'force-dynamic';
@@ -11,9 +10,6 @@ export const dynamic = 'force-dynamic';
 const invalid = () => NextResponse.json({ error: 'INVALID' }, { status: 400 });
 const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 const KAKAO_ID = /^\d{1,20}$/;
-
-/** 아직 DB에 없는 카카오 가게. 현장 인증·쿨다운을 통과하면 places에 저장한다 */
-type NewShop = Omit<PlaceRow, 'id' | 'zone_id'> & { kakao_id: string };
 
 export async function POST(req: Request) {
   const body = await req.json().catch(() => null);
@@ -40,21 +36,9 @@ export async function POST(req: Request) {
   if (byKakao) {
     ({ data: place } = await db.from('places').select('*').eq('kakao_id', kakaoId).maybeSingle<PlaceRow>());
     if (!place) {
-      const doc = await findShopNear(kakaoId as string, (kakaoName as string).trim(), { lat: lat as number, lng: lng as number }, KAKAO_VERIFY_RADIUS_M);
-      if (!doc) return invalid();
-      const category = shopCategory(doc)!;
-      newShop = {
-        kakao_id: doc.id,
-        name: doc.place_name,
-        category,
-        lat: Number(doc.y),
-        lng: Number(doc.x),
-        address: doc.road_address_name || doc.address_name || null,
-        description: doc.category_name.split(' > ').slice(1).join(' > ') || null,
-        baseline: CATEGORY_BASELINE[category],
-        event_active: false,
-        trend_surge: false,
-      };
+      // 아직 DB에 없는 가게: 내 위치 주변에서 카카오로 확인. 현장 인증·쿨다운을 통과하면 저장한다
+      newShop = await findKakaoShop(kakaoId as string, (kakaoName as string).trim(), { lat: lat as number, lng: lng as number });
+      if (!newShop) return invalid();
     }
   } else {
     ({ data: place } = await db.from('places').select('*').eq('id', placeId).maybeSingle<PlaceRow>());
@@ -106,12 +90,7 @@ export async function POST(req: Request) {
   }
 
   // 처음 열기를 받은 가게를 저장한다 (동시에 두 명이 올려도 kakao_id가 같아 한 줄만 생긴다)
-  if (newShop) {
-    const zoneId = await zoneAt(newShop);
-    const { error } = await db.from('places').upsert({ ...newShop, zone_id: zoneId }, { onConflict: 'kakao_id', ignoreDuplicates: true });
-    if (error) throw error;
-    ({ data: place } = await db.from('places').select('*').eq('kakao_id', newShop.kakao_id).single<PlaceRow>());
-  }
+  if (newShop) place = await saveKakaoShop(newShop);
   const saved = place!;
   const id = saved.id;
 
