@@ -8,6 +8,8 @@ export const NORMAL_TEMP = 20; // vsBaseline = 현재 열기 − 20°
 export const TEMP_PER_RATIO = 10;
 export const MAX_RATIO = 3;
 export const EVENT_BONUS = 5;
+// 일정 보너스: 시작 SCHEDULE_LEAD_MIN분 전부터 끝날 때까지 EVENT_BONUS를 켠다 (노션 2-3·5)
+export const SCHEDULE_LEAD_MIN = 60;
 
 // 어뷰징 방지 (5장·7장)
 export const COOLDOWN_MIN = 5;
@@ -106,3 +108,18 @@ export const HEAT_RADIUS_BY_CATEGORY: Record<Category, number> = {
 export const GPS_MAX_ACCURACY_M = 30;
 // 첫 열기 때 카카오에서 가게를 찾는 반경 (가게 반경 30m + 위치 오차 30m에 여유). 실제 인증은 위 규칙으로 한다
 export const KAKAO_VERIFY_RADIUS_M = 100;
+
+// 일정 (노션 「현재 진행 상황 공유」 5). 끝 시각이 없는 일정은 종류별로 시작 후 이만큼을 끝으로 본다
+export const SCHEDULE_KINDS = ['baseball', 'football', 'basketball', 'volleyball', 'festival', 'show', 'exhibition', 'busking', 'etc'] as const;
+export type ScheduleKind = (typeof SCHEDULE_KINDS)[number];
+export const SCHEDULE_DEFAULT_DURATION_MIN: Record<ScheduleKind, number> = {
+  baseball: 210, // KBO: 시작 후 3시간 30분
+  football: 150, // K리그: 시작 후 2시간 30분
+  basketball: 150, // KBL: 시작 후 2시간 30분
+  volleyball: 150, // V리그: 시작 후 2시간 30분
+  festival: 720, // 축제: 날짜만 있으면 10:00–22:00
+  show: 150,
+  exhibition: 480, // 전시: 시각이 없으면 10:00부터 8시간
+  busking: 120,
+  etc: 120,
+};

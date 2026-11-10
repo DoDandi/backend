@@ -8,7 +8,7 @@
 
 ## 시작하기
 
-1. Supabase 프로젝트 SQL Editor에서 `supabase/schema.sql` 실행 (이미 있는 DB라면 `migration-002-zones.sql`, `migration-003-posts.sql`처럼 아직 안 돌린 마이그레이션만)
+1. Supabase 프로젝트 SQL Editor에서 `supabase/schema.sql` 실행 (이미 있는 DB라면 `migration-002-zones.sql`, `migration-005-schedules.sql`처럼 아직 안 돌린 마이그레이션만)
 2. `.env.local.example`을 `.env.local`로 복사해 값 채우기 (값은 팀 비밀 채널로 공유)
 3. 실행
 
@@ -16,7 +16,9 @@
 npm install
 npm run dev -- -p 4000   # 프론트가 http://localhost:4000 으로 요청을 넘김
 npm test                 # 온도 엔진 단위 테스트
-npm run seed             # data/zones.csv + data/places.csv → 카카오 검색 → DB
+npm run seed             # data/zones.csv + data/places.csv → 카카오 검색 → DB (--only-new, --dry-run)
+npm run sync-events      # TourAPI 축제 + KOPIS 공연 → schedules, 30일 (--source tour|kopis, --days, --dry-run). TOUR_API_KEY·KOPIS_API_KEY 필요
+npm run sync-schedules   # data/schedules-manual.csv → schedules (--dry-run, --demo-today <장소> --kind basketball, --reset-demo)
 ```
 
 ## API
@@ -25,7 +27,7 @@ npm run seed             # data/zones.csv + data/places.csv → 카카오 검색
 | --- | --- |
 | `GET /api/places` | 장소 목록 + 현재 온도 (`?category=`) |
 | `GET /api/zones` | 구역 목록 + 현재 온도 |
-| `GET /api/places/[id]` | 장소 상세 |
+| `GET /api/places/[id]` | 장소 상세 (`todaySchedules` 오늘 일정 포함. 일정 시작 1시간 전 ~ 끝까지 행사 보너스 +5°) |
 | `GET /api/places/[id]/timeline` | 최근 6시간 10분 단위 온도 |
 | `POST /api/heat` | 열기 올리기. 본문에 `accuracy`(m, 폰 위치 오차) 필수. 장소 종류별 반경(가게 30m · 시장·거리 80m · 공연·축제 150m · 경기장 300m), 오차 30m 넘으면 `403 LOW_ACCURACY`, 밖이면 `403 TOO_FAR` |
 | `GET /api/course` | 열기 코스 (`lat`, `lng`, `limit`) |
