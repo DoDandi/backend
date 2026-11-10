@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { TIMELINE_HOURS, TIMELINE_STEP_MIN, WINDOW_MIN } from '@/lib/constants';
-import { fetchEventsSince, placeTemp, supabase, toHeatEvent, type PlaceRow } from '@/lib/supabase';
+import { fetchEventsSince, fetchSchedules, placeTemp, supabase, toHeatEvent, type PlaceRow } from '@/lib/supabase';
 import { toKSTISO } from '@/lib/time';
 
 export const dynamic = 'force-dynamic';
@@ -21,6 +21,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   ];
 
   const since = new Date(points[0].getTime() - WINDOW_MIN * 60_000);
-  const events = (await fetchEventsSince(since, id)).map(toHeatEvent);
-  return NextResponse.json(points.map(at => ({ at: toKSTISO(at), temp: placeTemp(place, events, at).temp })));
+  const [eventRows, schedules] = await Promise.all([fetchEventsSince(since, id), fetchSchedules(points[0], now, id)]);
+  const events = eventRows.map(toHeatEvent);
+  return NextResponse.json(points.map(at => ({ at: toKSTISO(at), temp: placeTemp(place, events, at, schedules).temp })));
 }
