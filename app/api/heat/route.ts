@@ -1,36 +1,80 @@
 import { NextResponse } from 'next/server';
-import { COOLDOWN_MIN, HEAT_RADIUS_M, HOURLY_LIMIT, SYNC_WINDOW_SEC, WINDOW_MIN } from '@/lib/constants';
-import { distanceM } from '@/lib/geo';
-import { fetchEventsSince, placeTemp, supabase, toHeatEvent, type PlaceRow } from '@/lib/supabase';
+import { CATEGORY_BASELINE, COOLDOWN_MIN, GPS_MAX_ACCURACY_M, HEAT_RADIUS_BY_CATEGORY, HOURLY_LIMIT, KAKAO_VERIFY_RADIUS_M, SYNC_WINDOW_SEC, WINDOW_MIN } from '@/lib/constants';
+import { checkOnSite, distanceM } from '@/lib/geo';
+import { findShopNear } from '@/lib/kakao';
+import { shopCategory } from '@/lib/shops';
+import { fetchEventsSince, placeTemp, supabase, toHeatEvent, zoneAt, type PlaceRow } from '@/lib/supabase';
 import { eventScore } from '@/lib/temperature';
 
 export const dynamic = 'force-dynamic';
 
 const invalid = () => NextResponse.json({ error: 'INVALID' }, { status: 400 });
 const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+const KAKAO_ID = /^\d{1,20}$/;
+
+/** 아직 DB에 없는 카카오 가게. 현장 인증·쿨다운을 통과하면 places에 저장한다 */
+type NewShop = Omit<PlaceRow, 'id' | 'zone_id'> & { kakao_id: string };
 
 export async function POST(req: Request) {
   const body = await req.json().catch(() => null);
   if (!body || typeof body !== 'object') return invalid();
-  const { placeId, deviceId, lat, lng, taps, shake } = body as Record<string, unknown>;
+  const { placeId, kakaoId, kakaoName, deviceId, lat, lng, accuracy, taps, shake } = body as Record<string, unknown>;
   const isDemo = !!process.env.DEMO_SECRET && req.headers.get('x-demo-secret') === process.env.DEMO_SECRET;
 
-  // 1. 입력 검증
-  if (typeof placeId !== 'string' || typeof deviceId !== 'string' || !deviceId) return invalid();
+  // 1. 입력 검증. 장소는 placeId(DB) 또는 kakaoId + kakaoName(지도에 점으로만 보이던 주변 가게)
+  const byKakao = kakaoId !== undefined;
+  if (byKakao) {
+    if (typeof kakaoId !== 'string' || !KAKAO_ID.test(kakaoId)) return invalid();
+    if (typeof kakaoName !== 'string' || !kakaoName.trim() || kakaoName.length > 100) return invalid();
+    if (!isNum(lat) || !isNum(lng)) return invalid(); // 가게를 내 위치 주변에서 찾기 때문에 데모도 좌표가 필요하다
+  } else if (typeof placeId !== 'string') return invalid();
+  if (typeof deviceId !== 'string' || !deviceId) return invalid();
   if (!Number.isInteger(taps) || (taps as number) < 0 || (taps as number) > 200) return invalid();
-  if (!isNum(shake) || shake < 0 || shake > 1) return invalid();
-  if (!isDemo && (!isNum(lat) || !isNum(lng))) return invalid();
+  // shake: null 이면 흔들기 센서 없음 → 연타만으로 점수 (11/7 결정)
+  if (shake !== null && (!isNum(shake) || shake < 0 || shake > 1)) return invalid();
+  if (!isDemo && (!isNum(lat) || !isNum(lng) || !isNum(accuracy))) return invalid();
 
   const db = supabase();
-  const { data: place } = await db.from('places').select('*').eq('id', placeId).maybeSingle<PlaceRow>();
-  if (!place) return invalid();
+  let place: PlaceRow | null = null;
+  let newShop: NewShop | null = null;
+  if (byKakao) {
+    ({ data: place } = await db.from('places').select('*').eq('kakao_id', kakaoId).maybeSingle<PlaceRow>());
+    if (!place) {
+      const doc = await findShopNear(kakaoId as string, (kakaoName as string).trim(), { lat: lat as number, lng: lng as number }, KAKAO_VERIFY_RADIUS_M);
+      if (!doc) return invalid();
+      const category = shopCategory(doc)!;
+      newShop = {
+        kakao_id: doc.id,
+        name: doc.place_name,
+        category,
+        lat: Number(doc.y),
+        lng: Number(doc.x),
+        address: doc.road_address_name || doc.address_name || null,
+        description: doc.category_name.split(' > ').slice(1).join(' > ') || null,
+        baseline: CATEGORY_BASELINE[category],
+        event_active: false,
+        trend_surge: false,
+      };
+    }
+  } else {
+    ({ data: place } = await db.from('places').select('*').eq('id', placeId).maybeSingle<PlaceRow>());
+  }
+  const target = place ?? newShop;
+  if (!target) return invalid();
 
   const now = new Date();
 
   if (!isDemo) {
-    // 2. 거리 검사
-    const d = distanceM({ lat: lat as number, lng: lng as number }, place);
-    if (d > HEAT_RADIUS_M) return NextResponse.json({ error: 'TOO_FAR', distanceM: Math.round(d) }, { status: 403 });
+    // 2. 현장 인증: 장소 종류별 반경 + 위치 오차
+    const radiusM = HEAT_RADIUS_BY_CATEGORY[target.category];
+    const d = distanceM({ lat: lat as number, lng: lng as number }, target);
+    const site = checkOnSite(d, accuracy as number, radiusM, GPS_MAX_ACCURACY_M);
+    if (!site.ok) {
+      return NextResponse.json(
+        { error: site.reason, distanceM: site.distanceM, radiusM, accuracyM: Math.round(accuracy as number), maxAccuracyM: GPS_MAX_ACCURACY_M },
+        { status: 403 }
+      );
+    }
 
     // 3. 쿨다운: 같은 기기·같은 장소 5분에 1회, 기기당 1시간 20회
     const { data: mine, error } = await db
@@ -41,7 +85,8 @@ export async function POST(req: Request) {
       .order('created_at', { ascending: false });
     if (error) throw error;
 
-    const samePlace = mine.find(e => e.place_id === placeId);
+    const existingId = place?.id;
+    const samePlace = existingId ? mine.find(e => e.place_id === existingId) : undefined;
     if (samePlace) {
       const elapsed = now.getTime() - new Date(samePlace.created_at).getTime();
       if (elapsed < COOLDOWN_MIN * 60_000) {
@@ -60,15 +105,25 @@ export async function POST(req: Request) {
     }
   }
 
+  // 처음 열기를 받은 가게를 저장한다 (동시에 두 명이 올려도 kakao_id가 같아 한 줄만 생긴다)
+  if (newShop) {
+    const zoneId = await zoneAt(newShop);
+    const { error } = await db.from('places').upsert({ ...newShop, zone_id: zoneId }, { onConflict: 'kakao_id', ignoreDuplicates: true });
+    if (error) throw error;
+    ({ data: place } = await db.from('places').select('*').eq('kakao_id', newShop.kakao_id).single<PlaceRow>());
+  }
+  const saved = place!;
+  const id = saved.id;
+
   // 저장 전 온도
-  const before = (await fetchEventsSince(new Date(now.getTime() - WINDOW_MIN * 60_000), placeId)).map(toHeatEvent);
-  const tempBefore = placeTemp(place, before, now).temp;
+  const before = (await fetchEventsSince(new Date(now.getTime() - WINDOW_MIN * 60_000), id)).map(toHeatEvent);
+  const tempBefore = placeTemp(saved, before, now).temp;
 
   // 4. 서버에서 점수를 다시 계산해 저장
-  const score = eventScore(taps as number, shake);
+  const score = eventScore(taps as number, shake as number | null);
   const { data: inserted, error: insErr } = await db
     .from('heat_events')
-    .insert({ place_id: placeId, device_id: deviceId, taps, shake, score, is_demo: isDemo })
+    .insert({ place_id: id, device_id: deviceId, taps, shake: shake ?? 0, score, is_demo: isDemo })
     .select('created_at')
     .single();
   if (insErr) throw insErr;
@@ -78,11 +133,13 @@ export async function POST(req: Request) {
   const after = [...before, { deviceId, score, createdAt }];
   // DB 시각이 앱 서버 시각보다 약간 앞설 수 있어, 새 기록이 빠지지 않도록 더 늦은 쪽을 기준으로 계산
   const afterNow = new Date(Math.max(Date.now(), createdAt.getTime()));
-  const tempAfter = placeTemp(place, after, afterNow).temp;
+  const tempAfter = placeTemp(saved, after, afterNow).temp;
   const syncSince = afterNow.getTime() - SYNC_WINDOW_SEC * 1000;
   const peers = new Set(after.filter(e => e.createdAt.getTime() >= syncSince).map(e => e.deviceId)).size;
 
   return NextResponse.json({
+    placeId: id,
+    created: !!newShop,
     tempBefore,
     tempAfter,
     delta: Math.round((tempAfter - tempBefore) * 10) / 10,

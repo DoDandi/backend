@@ -4,11 +4,15 @@
 //   2. places.csv의 장소를 키워드 검색해 좌표를 채우고 카카오 장소 ID 기준으로 넣거나 갱신
 //   3. 구역 중심·반경을 소속 장소로부터 계산
 //   4. 구역마다 auto_food·auto_cafe 개수만큼 카카오 카테고리 검색(음식점·카페)으로 매장을 자동 수집
+//      (한 번에 15곳씩 최대 3페이지 = 45곳. search_radius_m을 주면 그 반경에서 찾는다)
 //   이미 있는 장소는 baseline(수동 조정값)을 건드리지 않는다.
+// 옵션:
+//   --only-new  DB에 아직 중심 좌표가 없는 구역(새 구역)만 처리. 기존 구역·장소는 건드리지 않는다
+//   --dry-run   카카오 검색 결과와 구역 중심·반경만 출력하고 DB에는 쓰지 않는다
 import { config } from 'dotenv';
 import { readFileSync } from 'node:fs';
 import { createClient } from '@supabase/supabase-js';
-import { CATEGORIES, CATEGORY_BASELINE, DEFAULT_CENTER, ZONE_BASELINE, type Category } from '../lib/constants';
+import { CATEGORIES, CATEGORY_BASELINE, ZONE_BASELINE, type Category } from '../lib/constants';
 import { distanceM, type LatLng } from '../lib/geo';
 
 config({ path: '.env.local' });
@@ -19,9 +23,12 @@ if (!KAKAO_REST_API_KEY || !NEXT_PUBLIC_SUPABASE_URL || !SUPABASE_SERVICE_ROLE_K
   process.exit(1);
 }
 const db = createClient(NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } });
+const ONLY_NEW = process.argv.includes('--only-new');
+const DRY_RUN = process.argv.includes('--dry-run');
 
-// 키워드 검색 범위: 동성로 중심 15km (대구 시내. 다른 도시의 같은 이름 장소가 잡히지 않게)
-const SEARCH_RADIUS_M = 15_000;
+// 키워드 검색 범위: 대구시 전체 사각형 (군위군 제외). 다른 도시의 같은 이름 장소가 잡히지 않게.
+// 카카오 키워드 검색 반경은 최대 20km라 팔공산·현풍 같은 외곽이 빠져서 사각형(rect)으로 찾는다
+const DAEGU_RECT = '128.35,35.60,128.80,36.02';
 const ZONE_MIN_RADIUS_M = 150;
 const ZONE_MARGIN_M = 60;
 // 원도심 구역끼리 원이 크게 겹치지 않도록 반경 상한 (자동 매장 수집도 이 반경 안에서만)
@@ -69,14 +76,22 @@ type KakaoDoc = {
   road_address_name: string;
 };
 
-async function kakao(path: string, params: Record<string, string | number>): Promise<KakaoDoc[]> {
+async function kakaoPage(path: string, params: Record<string, string | number>): Promise<{ docs: KakaoDoc[]; isEnd: boolean }> {
   const qs = new URLSearchParams(Object.entries(params).map(([k, v]) => [k, String(v)]));
   const res = await fetch(`https://dapi.kakao.com/v2/local/search/${path}.json?${qs}`, {
     headers: { Authorization: `KakaoAK ${KAKAO_REST_API_KEY}` },
   });
   if (!res.ok) throw new Error(`카카오 검색 실패 ${res.status}: ${await res.text()}`);
-  return ((await res.json()) as { documents: KakaoDoc[] }).documents;
+  const body = (await res.json()) as { documents: KakaoDoc[]; meta: { is_end: boolean } };
+  return { docs: body.documents, isEnd: body.meta.is_end };
 }
+
+async function kakao(path: string, params: Record<string, string | number>): Promise<KakaoDoc[]> {
+  return (await kakaoPage(path, params)).docs;
+}
+
+/** 카카오 카테고리 검색은 페이지당 15곳, 최대 3페이지(45곳)까지 */
+const KAKAO_MAX_PAGES = 3;
 
 type PlaceRecord = {
   kakao_id: string;
@@ -100,6 +115,7 @@ const fromDoc = (d: KakaoDoc) => ({
 /** 카카오 장소 ID 기준으로 넣거나 갱신 (기존 행의 baseline은 유지) */
 async function upsertPlace(r: PlaceRecord): Promise<'inserted' | 'updated'> {
   const { data: existing } = await db.from('places').select('id').eq('kakao_id', r.kakao_id).maybeSingle();
+  if (DRY_RUN) return existing ? 'updated' : 'inserted';
   const { error } = existing
     ? await db.from('places').update(r).eq('id', existing.id)
     : await db.from('places').insert({ ...r, baseline: CATEGORY_BASELINE[r.category] });
@@ -117,14 +133,26 @@ function centroid(points: LatLng[]): LatLng {
 const read = (f: string) => parseCsv(readFileSync(f, 'utf8').replace(/^\uFEFF/, ''));
 
 async function main() {
-  const zoneRows = read('data/zones.csv');
-  const placeRows = read('data/places.csv');
+  let zoneRows = read('data/zones.csv');
+  let placeRows = read('data/places.csv');
+  if (ONLY_NEW) {
+    const { data, error } = await db.from('zones').select('name').not('lat', 'is', null);
+    if (error) throw new Error(`구역 조회 오류: ${error.message}`);
+    const done = new Set(data.map(z => z.name));
+    zoneRows = zoneRows.filter(z => !done.has(z.name));
+    placeRows = placeRows.filter(r => !done.has(r.zone));
+  }
+  if (DRY_RUN) console.log('[dry-run] DB에 쓰지 않습니다\n');
   const counts = { inserted: 0, updated: 0, failed: 0 };
 
   // 1. 구역
   const zoneId = new Map<string, string>();
   for (const z of zoneRows) {
     const record = { name: z.name, description: z.description || null, baseline: Number(z.baseline) || ZONE_BASELINE };
+    if (DRY_RUN) {
+      zoneId.set(z.name, `dry:${z.name}`);
+      continue;
+    }
     const { data, error } = await db.from('zones').upsert(record, { onConflict: 'name' }).select('id').single();
     if (error) throw new Error(`구역 DB 오류 (${z.name}): ${error.message}`);
     zoneId.set(z.name, data.id);
@@ -144,9 +172,7 @@ async function main() {
     }
     const [doc] = await kakao('keyword', {
       query: r.search_keyword || r.name,
-      x: DEFAULT_CENTER.lng,
-      y: DEFAULT_CENTER.lat,
-      radius: SEARCH_RADIUS_M,
+      rect: DAEGU_RECT,
       size: 1,
     });
     if (!doc) {
@@ -178,28 +204,39 @@ async function main() {
   for (const z of zoneRows) {
     const zid = zoneId.get(z.name)!;
     const points = zonePoints.get(z.name) ?? [];
+    const anchorCount = points.length;
     if (points.length === 0) {
       console.warn(`✗ 구역에 장소가 없어 중심을 정할 수 없음: ${z.name}`);
       continue;
     }
     const center = centroid(points);
+    // 대학가·역세권처럼 앵커 장소가 하나뿐인 구역은 search_radius_m으로 넓게 찾는다
+    const searchRadius = Number(z.search_radius_m) || 0;
     const zoneRadius = (pts: LatLng[]) =>
-      Math.round(Math.min(ZONE_MAX_RADIUS_M, Math.max(ZONE_MIN_RADIUS_M, ...pts.map(p => distanceM(center, p) + ZONE_MARGIN_M))));
-    const baseRadius = zoneRadius(points);
+      Math.round(
+        Math.min(Math.max(ZONE_MAX_RADIUS_M, searchRadius), Math.max(ZONE_MIN_RADIUS_M, ...pts.map(p => distanceM(center, p) + ZONE_MARGIN_M)))
+      );
+    const baseRadius = searchRadius || zoneRadius(points);
 
     for (const [code, category, n] of [
       ['FD6', 'food', Number(z.auto_food) || 0],
       ['CE7', 'cafe', Number(z.auto_cafe) || 0],
     ] as const) {
       if (n <= 0) continue;
-      const docs = await kakao('category', {
-        category_group_code: code,
-        x: center.lng,
-        y: center.lat,
-        radius: baseRadius,
-        sort: 'accuracy',
-        size: 15,
-      });
+      const docs: KakaoDoc[] = [];
+      for (let page = 1; page <= KAKAO_MAX_PAGES; page++) {
+        const r = await kakaoPage('category', {
+          category_group_code: code,
+          x: center.lng,
+          y: center.lat,
+          radius: baseRadius,
+          sort: 'accuracy',
+          size: 15,
+          page,
+        });
+        docs.push(...r.docs);
+        if (r.isEnd || docs.length >= n * 2) break; // 카페 거르기·중복을 감안해 넉넉히
+      }
       let added = 0;
       for (const d of docs) {
         if (added >= n) break;
@@ -222,7 +259,10 @@ async function main() {
       }
     }
 
-    const radius = zoneRadius(points);
+    // 매장 자동 수집이 없는 구역(길잡이 장소만)은 search_radius_m을 구역 반경으로 쓴다
+    const radius = points.length === anchorCount && searchRadius ? searchRadius : zoneRadius(points);
+    console.log(`◎ ${z.name}: 중심 ${center.lat.toFixed(5)},${center.lng.toFixed(5)} 반경 ${radius}m`);
+    if (DRY_RUN) continue;
     const { error } = await db.from('zones').update({ lat: center.lat, lng: center.lng, radius_m: radius }).eq('id', zid);
     if (error) throw new Error(`구역 갱신 오류 (${z.name}): ${error.message}`);
   }

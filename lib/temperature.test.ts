@@ -5,16 +5,17 @@ const now = new Date('2026-11-07T12:00:00Z');
 const at = (secAgo: number) => new Date(now.getTime() - secAgo * 1000);
 
 describe('temperature', () => {
-  it('반응 0건이면 20°C', () => {
-    expect(temperature({ baseline: 10, eventActive: false, trendSurge: false }, [], now)).toBe(20);
+  it('반응 0건이면 10° (서늘)', () => {
+    expect(temperature({ baseline: 10, eventActive: false }, [], now)).toBe(10);
+    expect(band(10)).toBe('mild');
   });
 
-  it('4장 예시: B=10, R=25, 행사 진행 중 → 50°C (대프리카)', () => {
+  it('예시: B=10, R=25, 행사 진행 중 → 10 + 25 + 5 = 40° (대프리카)', () => {
     // 같은 기기, 방금 올린 점수 1짜리 25건 → 감쇠 1, 동시성 1 → R = 25
     const events: HeatEvent[] = Array.from({ length: 25 }, () => ({ deviceId: 'a', score: 1, createdAt: now }));
     expect(reactionScore(events, now)).toBeCloseTo(25);
-    const t = temperature({ baseline: 10, eventActive: true, trendSurge: false }, events, now);
-    expect(t).toBe(50);
+    const t = temperature({ baseline: 10, eventActive: true }, events, now);
+    expect(t).toBe(40);
     expect(band(t)).toBe('daefrica');
   });
 
@@ -35,9 +36,18 @@ describe('temperature', () => {
     expect(reactionScore(events, now)).toBe(0);
   });
 
-  it('비율은 3배에서 상한', () => {
+  it('비율은 3배에서 상한 (10 + 30 = 40°)', () => {
     const events: HeatEvent[] = Array.from({ length: 100 }, () => ({ deviceId: 'a', score: 1, createdAt: now }));
-    expect(temperature({ baseline: 10, eventActive: false, trendSurge: true }, events, now)).toBe(53);
+    expect(temperature({ baseline: 10, eventActive: false }, events, now)).toBe(40);
+  });
+
+  it('평소 수준(R = B)이면 20° (따뜻 시작)', () => {
+    const events: HeatEvent[] = Array.from({ length: 10 }, () => ({ deviceId: 'a', score: 1, createdAt: now }));
+    expect(temperature({ baseline: 10, eventActive: false }, events, now)).toBe(20);
+    expect(band(20)).toBe('warm');
+    expect(band(29.9)).toBe('warm');
+    expect(band(30)).toBe('hot');
+    expect(band(19.9)).toBe('mild');
   });
 });
 
@@ -48,5 +58,9 @@ describe('eventScore', () => {
   });
   it('연타 20회·흔들기 0 → 0.35', () => {
     expect(eventScore(20, 0)).toBeCloseTo(0.35);
+  });
+  it('흔들기 센서 없음(null)이면 연타만으로 최대 1점', () => {
+    expect(eventScore(20, null)).toBeCloseTo(0.5);
+    expect(eventScore(40, null)).toBe(1);
   });
 });
