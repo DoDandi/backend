@@ -4,6 +4,7 @@
 //   2. places.csv의 장소를 키워드 검색해 좌표를 채우고 카카오 장소 ID 기준으로 넣거나 갱신
 //   3. 구역 중심·반경을 소속 장소로부터 계산
 //   4. 구역마다 auto_food·auto_cafe 개수만큼 카카오 카테고리 검색(음식점·카페)으로 매장을 자동 수집
+//      (한 번에 15곳씩 최대 3페이지 = 45곳. search_radius_m을 주면 그 반경에서 찾는다)
 //   이미 있는 장소는 baseline(수동 조정값)을 건드리지 않는다.
 import { config } from 'dotenv';
 import { readFileSync } from 'node:fs';
@@ -69,14 +70,22 @@ type KakaoDoc = {
   road_address_name: string;
 };
 
-async function kakao(path: string, params: Record<string, string | number>): Promise<KakaoDoc[]> {
+async function kakaoPage(path: string, params: Record<string, string | number>): Promise<{ docs: KakaoDoc[]; isEnd: boolean }> {
   const qs = new URLSearchParams(Object.entries(params).map(([k, v]) => [k, String(v)]));
   const res = await fetch(`https://dapi.kakao.com/v2/local/search/${path}.json?${qs}`, {
     headers: { Authorization: `KakaoAK ${KAKAO_REST_API_KEY}` },
   });
   if (!res.ok) throw new Error(`카카오 검색 실패 ${res.status}: ${await res.text()}`);
-  return ((await res.json()) as { documents: KakaoDoc[] }).documents;
+  const body = (await res.json()) as { documents: KakaoDoc[]; meta: { is_end: boolean } };
+  return { docs: body.documents, isEnd: body.meta.is_end };
 }
+
+async function kakao(path: string, params: Record<string, string | number>): Promise<KakaoDoc[]> {
+  return (await kakaoPage(path, params)).docs;
+}
+
+/** 카카오 카테고리 검색은 페이지당 15곳, 최대 3페이지(45곳)까지 */
+const KAKAO_MAX_PAGES = 3;
 
 type PlaceRecord = {
   kakao_id: string;
@@ -183,23 +192,33 @@ async function main() {
       continue;
     }
     const center = centroid(points);
+    // 대학가·역세권처럼 앵커 장소가 하나뿐인 구역은 search_radius_m으로 넓게 찾는다
+    const searchRadius = Number(z.search_radius_m) || 0;
     const zoneRadius = (pts: LatLng[]) =>
-      Math.round(Math.min(ZONE_MAX_RADIUS_M, Math.max(ZONE_MIN_RADIUS_M, ...pts.map(p => distanceM(center, p) + ZONE_MARGIN_M))));
-    const baseRadius = zoneRadius(points);
+      Math.round(
+        Math.min(Math.max(ZONE_MAX_RADIUS_M, searchRadius), Math.max(ZONE_MIN_RADIUS_M, ...pts.map(p => distanceM(center, p) + ZONE_MARGIN_M)))
+      );
+    const baseRadius = searchRadius || zoneRadius(points);
 
     for (const [code, category, n] of [
       ['FD6', 'food', Number(z.auto_food) || 0],
       ['CE7', 'cafe', Number(z.auto_cafe) || 0],
     ] as const) {
       if (n <= 0) continue;
-      const docs = await kakao('category', {
-        category_group_code: code,
-        x: center.lng,
-        y: center.lat,
-        radius: baseRadius,
-        sort: 'accuracy',
-        size: 15,
-      });
+      const docs: KakaoDoc[] = [];
+      for (let page = 1; page <= KAKAO_MAX_PAGES; page++) {
+        const r = await kakaoPage('category', {
+          category_group_code: code,
+          x: center.lng,
+          y: center.lat,
+          radius: baseRadius,
+          sort: 'accuracy',
+          size: 15,
+          page,
+        });
+        docs.push(...r.docs);
+        if (r.isEnd || docs.length >= n * 2) break; // 카페 거르기·중복을 감안해 넉넉히
+      }
       let added = 0;
       for (const d of docs) {
         if (added >= n) break;
