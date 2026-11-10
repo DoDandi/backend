@@ -6,6 +6,9 @@
 //   4. 구역마다 auto_food·auto_cafe 개수만큼 카카오 카테고리 검색(음식점·카페)으로 매장을 자동 수집
 //      (한 번에 15곳씩 최대 3페이지 = 45곳. search_radius_m을 주면 그 반경에서 찾는다)
 //   이미 있는 장소는 baseline(수동 조정값)을 건드리지 않는다.
+// 옵션:
+//   --only-new  DB에 아직 중심 좌표가 없는 구역(새 구역)만 처리. 기존 구역·장소는 건드리지 않는다
+//   --dry-run   카카오 검색 결과와 구역 중심·반경만 출력하고 DB에는 쓰지 않는다
 import { config } from 'dotenv';
 import { readFileSync } from 'node:fs';
 import { createClient } from '@supabase/supabase-js';
@@ -20,6 +23,8 @@ if (!KAKAO_REST_API_KEY || !NEXT_PUBLIC_SUPABASE_URL || !SUPABASE_SERVICE_ROLE_K
   process.exit(1);
 }
 const db = createClient(NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } });
+const ONLY_NEW = process.argv.includes('--only-new');
+const DRY_RUN = process.argv.includes('--dry-run');
 
 // 키워드 검색 범위: 대구시 전체 사각형 (군위군 제외). 다른 도시의 같은 이름 장소가 잡히지 않게.
 // 카카오 키워드 검색 반경은 최대 20km라 팔공산·현풍 같은 외곽이 빠져서 사각형(rect)으로 찾는다
@@ -110,6 +115,7 @@ const fromDoc = (d: KakaoDoc) => ({
 /** 카카오 장소 ID 기준으로 넣거나 갱신 (기존 행의 baseline은 유지) */
 async function upsertPlace(r: PlaceRecord): Promise<'inserted' | 'updated'> {
   const { data: existing } = await db.from('places').select('id').eq('kakao_id', r.kakao_id).maybeSingle();
+  if (DRY_RUN) return existing ? 'updated' : 'inserted';
   const { error } = existing
     ? await db.from('places').update(r).eq('id', existing.id)
     : await db.from('places').insert({ ...r, baseline: CATEGORY_BASELINE[r.category] });
@@ -127,14 +133,26 @@ function centroid(points: LatLng[]): LatLng {
 const read = (f: string) => parseCsv(readFileSync(f, 'utf8').replace(/^\uFEFF/, ''));
 
 async function main() {
-  const zoneRows = read('data/zones.csv');
-  const placeRows = read('data/places.csv');
+  let zoneRows = read('data/zones.csv');
+  let placeRows = read('data/places.csv');
+  if (ONLY_NEW) {
+    const { data, error } = await db.from('zones').select('name').not('lat', 'is', null);
+    if (error) throw new Error(`구역 조회 오류: ${error.message}`);
+    const done = new Set(data.map(z => z.name));
+    zoneRows = zoneRows.filter(z => !done.has(z.name));
+    placeRows = placeRows.filter(r => !done.has(r.zone));
+  }
+  if (DRY_RUN) console.log('[dry-run] DB에 쓰지 않습니다\n');
   const counts = { inserted: 0, updated: 0, failed: 0 };
 
   // 1. 구역
   const zoneId = new Map<string, string>();
   for (const z of zoneRows) {
     const record = { name: z.name, description: z.description || null, baseline: Number(z.baseline) || ZONE_BASELINE };
+    if (DRY_RUN) {
+      zoneId.set(z.name, `dry:${z.name}`);
+      continue;
+    }
     const { data, error } = await db.from('zones').upsert(record, { onConflict: 'name' }).select('id').single();
     if (error) throw new Error(`구역 DB 오류 (${z.name}): ${error.message}`);
     zoneId.set(z.name, data.id);
@@ -186,6 +204,7 @@ async function main() {
   for (const z of zoneRows) {
     const zid = zoneId.get(z.name)!;
     const points = zonePoints.get(z.name) ?? [];
+    const anchorCount = points.length;
     if (points.length === 0) {
       console.warn(`✗ 구역에 장소가 없어 중심을 정할 수 없음: ${z.name}`);
       continue;
@@ -240,7 +259,10 @@ async function main() {
       }
     }
 
-    const radius = zoneRadius(points);
+    // 매장 자동 수집이 없는 구역(길잡이 장소만)은 search_radius_m을 구역 반경으로 쓴다
+    const radius = points.length === anchorCount && searchRadius ? searchRadius : zoneRadius(points);
+    console.log(`◎ ${z.name}: 중심 ${center.lat.toFixed(5)},${center.lng.toFixed(5)} 반경 ${radius}m`);
+    if (DRY_RUN) continue;
     const { error } = await db.from('zones').update({ lat: center.lat, lng: center.lng, radius_m: radius }).eq('id', zid);
     if (error) throw new Error(`구역 갱신 오류 (${z.name}): ${error.message}`);
   }
