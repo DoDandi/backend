@@ -79,8 +79,8 @@ create table schedules (
   id           uuid primary key default gen_random_uuid(),
   place_id     uuid not null references places(id) on delete cascade,
   title        text not null,
-  kind         text not null check (kind in ('baseball','football','basketball','volleyball','festival','show','busking','etc')),
-  source       text not null check (source in ('kbo','kleague','festival','manual','demo')),
+  kind         text not null check (kind in ('baseball','football','basketball','volleyball','festival','show','exhibition','busking','etc')),
+  source       text not null check (source in ('kbo','kleague','kbl','festival','kopis','exhibition','manual','demo')),
   external_id  text,                                  -- 같은 일정을 다시 넣어도 중복되지 않게 (source별 고유)
   starts_at    timestamptz not null,
   ends_at      timestamptz not null,

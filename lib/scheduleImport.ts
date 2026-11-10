@@ -6,7 +6,7 @@ export type ScheduleDraft = {
   venue: string;
   title: string;
   kind: ScheduleKind;
-  source: 'kbo' | 'kleague' | 'festival' | 'manual' | 'demo';
+  source: 'kbo' | 'kleague' | 'kbl' | 'festival' | 'kopis' | 'exhibition' | 'manual' | 'demo';
   externalId: string;
   startsAt: Date;
   endsAt: Date;

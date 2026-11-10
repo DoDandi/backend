@@ -17,6 +17,7 @@ npm install
 npm run dev -- -p 4000   # 프론트가 http://localhost:4000 으로 요청을 넘김
 npm test                 # 온도 엔진 단위 테스트
 npm run seed             # data/zones.csv + data/places.csv → 카카오 검색 → DB (--only-new, --dry-run)
+npm run sync-events      # TourAPI 축제 + KOPIS 공연 → schedules, 30일 (--source tour|kopis, --days, --dry-run). TOUR_API_KEY·KOPIS_API_KEY 필요
 npm run sync-schedules   # data/schedules-manual.csv → schedules (--dry-run, --demo-today <장소> --kind basketball, --reset-demo)
 ```
 

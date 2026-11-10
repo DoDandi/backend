@@ -110,7 +110,7 @@ export const GPS_MAX_ACCURACY_M = 30;
 export const KAKAO_VERIFY_RADIUS_M = 100;
 
 // 일정 (노션 「현재 진행 상황 공유」 5). 끝 시각이 없는 일정은 종류별로 시작 후 이만큼을 끝으로 본다
-export const SCHEDULE_KINDS = ['baseball', 'football', 'basketball', 'volleyball', 'festival', 'show', 'busking', 'etc'] as const;
+export const SCHEDULE_KINDS = ['baseball', 'football', 'basketball', 'volleyball', 'festival', 'show', 'exhibition', 'busking', 'etc'] as const;
 export type ScheduleKind = (typeof SCHEDULE_KINDS)[number];
 export const SCHEDULE_DEFAULT_DURATION_MIN: Record<ScheduleKind, number> = {
   baseball: 210, // KBO: 시작 후 3시간 30분
@@ -119,6 +119,7 @@ export const SCHEDULE_DEFAULT_DURATION_MIN: Record<ScheduleKind, number> = {
   volleyball: 150, // V리그: 시작 후 2시간 30분
   festival: 720, // 축제: 날짜만 있으면 10:00–22:00
   show: 150,
+  exhibition: 480, // 전시: 시각이 없으면 10:00부터 8시간
   busking: 120,
   etc: 120,
 };

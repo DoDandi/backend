@@ -7,8 +7,8 @@ create table if not exists schedules (
   id           uuid primary key default gen_random_uuid(),
   place_id     uuid not null references places(id) on delete cascade,
   title        text not null,
-  kind         text not null check (kind in ('baseball','football','basketball','volleyball','festival','show','busking','etc')),
-  source       text not null check (source in ('kbo','kleague','festival','manual','demo')),
+  kind         text not null check (kind in ('baseball','football','basketball','volleyball','festival','show','exhibition','busking','etc')),
+  source       text not null check (source in ('kbo','kleague','kbl','festival','kopis','exhibition','manual','demo')),
   external_id  text,                                  -- 같은 일정을 다시 넣어도 중복되지 않게 (source별 고유)
   starts_at    timestamptz not null,
   ends_at      timestamptz not null,
@@ -22,7 +22,10 @@ create index if not exists schedules_time on schedules (starts_at, ends_at);
 alter table schedules enable row level security;
 grant select, insert, update, delete on table schedules to service_role;
 
--- 경기 종류에 농구·배구 추가 (이미 만든 테이블의 제약을 바꾼다)
+-- 종류(농구·배구·전시)와 출처(KBL·KOPIS·전시) 추가 (이미 만든 테이블의 제약을 바꾼다)
 alter table schedules drop constraint if exists schedules_kind_check;
 alter table schedules add constraint schedules_kind_check
-  check (kind in ('baseball','football','basketball','volleyball','festival','show','busking','etc'));
+  check (kind in ('baseball','football','basketball','volleyball','festival','show','exhibition','busking','etc'));
+alter table schedules drop constraint if exists schedules_source_check;
+alter table schedules add constraint schedules_source_check
+  check (source in ('kbo','kleague','kbl','festival','kopis','exhibition','manual','demo'));
