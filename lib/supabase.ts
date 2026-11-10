@@ -1,5 +1,5 @@
 import 'server-only';
-import type { Bbox } from './geo';
+import { distanceM, type Bbox, type LatLng } from './geo';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { CATEGORY_GROUP, FEED_LIMIT, NORMAL_TEMP, POST_IMAGE_BUCKET, WINDOW_MIN, type Category } from './constants';
 import { toPost, type Post, type PostRow } from './posts';
@@ -144,6 +144,18 @@ export type ZoneRow = {
   event_active: boolean;
   trend_surge: boolean;
 };
+
+/** 이 지점을 반경 안에 두는 가장 가까운 구역 id (없으면 null) */
+export async function zoneAt(p: LatLng): Promise<string | null> {
+  const { data, error } = await supabase().from('zones').select('id, lat, lng, radius_m').not('lat', 'is', null);
+  if (error) throw error;
+  let best: { id: string; d: number } | null = null;
+  for (const z of data as { id: string; lat: number; lng: number; radius_m: number }[]) {
+    const d = distanceM(p, z);
+    if (d <= z.radius_m && (!best || d < best.d)) best = { id: z.id, d };
+  }
+  return best?.id ?? null;
+}
 
 /** 구역 목록 + 현재 온도. 구역 안 모든 장소의 반응을 합쳐 같은 엔진으로 계산 (동시성도 구역 단위) */
 export async function zonesWithTemps() {

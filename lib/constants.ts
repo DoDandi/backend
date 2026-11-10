@@ -104,3 +104,5 @@ export const HEAT_RADIUS_BY_CATEGORY: Record<Category, number> = {
 };
 // 폰이 알려 주는 위치 오차(m)가 이보다 크면 인증하지 않는다
 export const GPS_MAX_ACCURACY_M = 30;
+// 첫 열기 때 카카오에서 가게를 찾는 반경 (가게 반경 30m + 위치 오차 30m에 여유). 실제 인증은 위 규칙으로 한다
+export const KAKAO_VERIFY_RADIUS_M = 100;
