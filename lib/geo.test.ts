@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { checkOnSite } from './geo';
+import { checkOnSite, parseBbox } from './geo';
 
 describe('checkOnSite', () => {
   it('반경 안이고 오차가 작으면 인증', () => {
@@ -21,5 +21,18 @@ describe('checkOnSite', () => {
   it('오차 값이 이상하면(음수·NaN) LOW_ACCURACY', () => {
     expect(checkOnSite(5, -1, 30, 30).ok).toBe(false);
     expect(checkOnSite(5, Number.NaN, 30, 30).ok).toBe(false);
+  });
+});
+
+describe('parseBbox', () => {
+  it('서,남,동,북을 읽는다', () => {
+    expect(parseBbox('128.58,35.86,128.61,35.88')).toEqual({ minLng: 128.58, minLat: 35.86, maxLng: 128.61, maxLat: 35.88 });
+  });
+  it('없거나 틀리면 null', () => {
+    expect(parseBbox(null)).toBeNull();
+    expect(parseBbox('1,2,3')).toBeNull();
+    expect(parseBbox('a,b,c,d')).toBeNull();
+    expect(parseBbox('128.61,35.86,128.58,35.88')).toBeNull(); // 서 > 동
+    expect(parseBbox('128,95,129,96')).toBeNull(); // 위도 범위 밖
   });
 });

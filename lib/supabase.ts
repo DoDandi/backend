@@ -1,4 +1,5 @@
 import 'server-only';
+import type { Bbox } from './geo';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { CATEGORY_GROUP, FEED_LIMIT, NORMAL_TEMP, POST_IMAGE_BUCKET, WINDOW_MIN, type Category } from './constants';
 import { toPost, type Post, type PostRow } from './posts';
@@ -98,11 +99,19 @@ async function latestPhotoByPlace(): Promise<Map<string, string>> {
   return m;
 }
 
-/** 장소 목록 + 현재 온도 (최근 30분 heat_events를 한 번에 가져와 장소별로 계산) */
-export async function placesWithTemps(category?: Category) {
+/**
+ * 장소 목록 + 현재 온도 (최근 30분 heat_events를 한 번에 가져와 장소별로 계산).
+ * bbox를 주면 그 화면 범위 안, zoneId를 주면 그 구역 장소만.
+ */
+export async function placesWithTemps(category?: Category, opts: { bbox?: Bbox | null; zoneId?: string | null } = {}) {
   const now = new Date();
   let q = supabase().from('places').select('*').order('name');
   if (category) q = q.eq('category', category);
+  if (opts.bbox) {
+    const b = opts.bbox;
+    q = q.gte('lat', b.minLat).lte('lat', b.maxLat).gte('lng', b.minLng).lte('lng', b.maxLng);
+  }
+  if (opts.zoneId) q = q.eq('zone_id', opts.zoneId);
   const [{ data, error }, rows, photos] = await Promise.all([
     q,
     fetchEventsSince(new Date(now.getTime() - WINDOW_MIN * 60_000)),
