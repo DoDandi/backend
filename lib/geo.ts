@@ -22,3 +22,16 @@ export function checkOnSite(distance: number, accuracy: number, radius: number, 
   if (!(accuracy >= 0) || accuracy > maxAccuracy) return { ok: false, reason: 'LOW_ACCURACY', distanceM };
   return distance - accuracy <= radius ? { ok: true, distanceM } : { ok: false, reason: 'TOO_FAR', distanceM };
 }
+
+export type Bbox = { minLng: number; minLat: number; maxLng: number; maxLat: number };
+
+/** "서,남,동,북" (경도,위도,경도,위도) → Bbox. 형식이 틀리거나 범위를 벗어나면 null */
+export function parseBbox(raw: string | null): Bbox | null {
+  if (!raw) return null;
+  const n = raw.split(',').map(Number);
+  if (n.length !== 4 || n.some(v => !Number.isFinite(v))) return null;
+  const [minLng, minLat, maxLng, maxLat] = n;
+  if (minLng >= maxLng || minLat >= maxLat) return null;
+  if (minLng < -180 || maxLng > 180 || minLat < -90 || maxLat > 90) return null;
+  return { minLng, minLat, maxLng, maxLat };
+}
