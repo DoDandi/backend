@@ -82,6 +82,8 @@ export const CATEGORY_GROUP: Record<Category, Group> = {
 };
 
 // 게시물 (사진 1장 + 글, 11/9 피그마 SCREEN 07·08)
+/** 같은 사람이 같은 장소에 글을 다시 남기려면 기다려야 하는 시간 (노션 '공식 상세 설명': 30분에 1개) */
+export const POST_COOLDOWN_MIN = 30;
 export const POST_TEXT_MAX = 300;
 export const POST_IMAGE_MAX_BYTES = 4 * 1024 * 1024; // Vercel 요청 한도 4.5MB 안. 프론트가 1280px JPEG로 줄여 보낸다
 export const POST_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp'] as const;
