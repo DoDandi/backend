@@ -7,15 +7,17 @@
 //   npm run sync-schedules -- --demo-today 삼성라이온즈파크 [--time 18:30] [--title "삼성 vs LG"] [--kind baseball]
 //                                                데모용: 오늘 그 장소에 일정 1건 (시즌이 끝나 실제 경기가 없을 때)
 //   npm run sync-schedules -- --reset-demo       데모 일정(source=demo) 전부 삭제
+//   npm run sync-schedules -- --kbl [--days 60]  KBL 경기 (오늘부터 N일). venues.csv에 'KBL:<경기장>'이 있는 경기장만
 //
 // 장소 연결: venue는 data/venues.csv(external_name → place_name)로 바꾼 뒤 places.name과 맞춘다.
-// KBO·K리그·축제 공공데이터 자동 수집은 아직 없음 (KBO 비공식 API, K리그 인증키 확인 중).
+// KBO·K리그 자동 수집은 아직 없음 (KBO 비공식 API, K리그 인증키 확인 중).
+// KBL은 공식 웹사이트가 쓰는 비공식 JSON(api.kbl.or.kr)이라 바뀌거나 막힐 수 있다.
 import { config } from 'dotenv';
 import { readFileSync } from 'node:fs';
 import { createClient } from '@supabase/supabase-js';
 import { SCHEDULE_KINDS, type ScheduleKind } from '../lib/constants';
 import { parseCsv } from '../lib/csv';
-import { kst, manualRowToDraft, resolveVenue, type ScheduleDraft } from '../lib/scheduleImport';
+import { kblGameToDraft, kst, manualRowToDraft, resolveVenue, type KblGame, type ScheduleDraft } from '../lib/scheduleImport';
 import { defaultEnd } from '../lib/schedules';
 import { toKSTISO } from '../lib/time';
 
@@ -50,6 +52,22 @@ function demoDraft(placeName: string): ScheduleDraft {
   };
 }
 
+const KBL_URL = 'https://api.kbl.or.kr/match/list';
+
+/** 오늘부터 days일 동안의 KBL 1군 경기 중 venues.csv에 매핑된 경기장 것만 */
+async function kblDrafts(venues: Record<string, string>[], days: number): Promise<ScheduleDraft[]> {
+  const ymd = (d: Date) => toKSTISO(d).slice(0, 10).replace(/-/g, '');
+  const now = new Date();
+  const url = `${KBL_URL}?fromDate=${ymd(now)}&toDate=${ymd(new Date(now.getTime() + days * 86_400_000))}&seasonGrade=1`;
+  const res = await fetch(url, {
+    headers: { accept: 'application/json', 'x-requested-with': 'XMLHttpRequest', channel: 'WEB', teamcode: 'XX', lang: 'ko' },
+  });
+  if (!res.ok) throw new Error(`KBL ${res.status}`);
+  const games = (await res.json()) as KblGame[];
+  const mapped = new Set(venues.map(v => v.external_name?.trim()));
+  return games.map(kblGameToDraft).filter((d): d is ScheduleDraft => d !== null && mapped.has(d.venue));
+}
+
 function print(drafts: ScheduleDraft[]) {
   for (const d of drafts) {
     console.log(`  [${d.source}] ${d.venue} · ${d.title} (${d.kind}) ${toKSTISO(d.startsAt)} ~ ${toKSTISO(d.endsAt)}`);
@@ -58,8 +76,12 @@ function print(drafts: ScheduleDraft[]) {
 
 async function main() {
   const demoPlace = opt('demo-today');
-  const drafts: ScheduleDraft[] = demoPlace ? [demoDraft(demoPlace)] : read('data/schedules-manual.csv').map(manualRowToDraft);
   const venues = read('data/venues.csv');
+  const drafts: ScheduleDraft[] = demoPlace
+    ? [demoDraft(demoPlace)]
+    : flag('kbl')
+      ? await kblDrafts(venues, Number(opt('days') ?? 60))
+      : read('data/schedules-manual.csv').map(manualRowToDraft);
   for (const d of drafts) d.venue = resolveVenue(d.venue, venues);
 
   if (flag('dry-run')) {

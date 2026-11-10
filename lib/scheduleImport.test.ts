@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { parseCsv } from './csv';
-import { manualRowToDraft, resolveVenue } from './scheduleImport';
+import { kblGameToDraft, manualRowToDraft, resolveVenue } from './scheduleImport';
 
 describe('manualRowToDraft', () => {
   it('경기: end가 없으면 종류별 기본 길이 (야구 3시간 30분)', () => {
@@ -36,4 +36,26 @@ describe('resolveVenue', () => {
   const venues = parseCsv('external_name,place_name\n대구,삼성라이온즈파크\n');
   it('매핑이 있으면 우리 장소 이름', () => expect(resolveVenue('대구', venues)).toBe('삼성라이온즈파크'));
   it('없으면 그대로', () => expect(resolveVenue('엑스코', venues)).toBe('엑스코'));
+});
+
+describe('kblGameToDraft', () => {
+  const game = { gmkey: 'S49G01N60', gameDate: '20261112', gameStart: '1900', stadiumname: '대구', tnameH: '대구 한국가스공사', tnameA: '고양 소노' };
+
+  it('KBL 경기 → 농구 일정 (KST, 2시간 30분)', () => {
+    const d = kblGameToDraft(game)!;
+    expect(d.venue).toBe('KBL:대구');
+    expect(d.title).toBe('대구 한국가스공사 vs 고양 소노');
+    expect(d.kind).toBe('basketball');
+    expect(d.source).toBe('kbl');
+    expect(d.externalId).toBe('S49G01N60');
+    expect(d.startsAt.toISOString()).toBe('2026-11-12T10:00:00.000Z');
+    expect(d.endsAt.getTime() - d.startsAt.getTime()).toBe(150 * 60_000);
+  });
+
+  it('시작 시각 미정이면 null', () => expect(kblGameToDraft({ ...game, gameStart: null })).toBeNull());
+
+  it('KBL 대구는 야구장이 아니라 대구실내체육관으로', () => {
+    const venues = parseCsv('external_name,place_name\n대구,삼성라이온즈파크\nKBL:대구,대구실내체육관\n');
+    expect(resolveVenue(kblGameToDraft(game)!.venue, venues)).toBe('대구실내체육관');
+  });
 });
